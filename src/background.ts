@@ -85,14 +85,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return true;
         }
 
-        handleSummarize(videoId, sendResponse);
+        // Use Promise handling with proper response
+        handleSummarize(videoId, sendResponse)
+            .catch(error => {
+                // console.error('Error in handleSummarize:', error);
+                sendResponse({
+                    success: false,
+                    error: 'An unexpected error occurred'
+                });
+            });
+        
         return true; // Keep the message channel open for async responses
     }
     
     if (message.action === 'checkApiKey') {
-        checkApiKeyAndInitClient().then(response => {
-            sendResponse(response);
-        });
+        checkApiKeyAndInitClient()
+            .then(response => {
+                sendResponse(response);
+            })
+            .catch(error => {
+                // console.error('Error checking API key:', error);
+                sendResponse({ 
+                    success: false, 
+                    error: 'Failed to check API key', 
+                    needsApiKey: true 
+                });
+            });
+        
         return true; // Keep the message channel open for async responses
     }
     
@@ -100,14 +119,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Reset the client to force reinitialization with the new API key
         client = null;
         console.log('OpenAI client reset');
-        
-        if (sendResponse) {
-            sendResponse({ success: true });
-        }
+        sendResponse({ success: true });
         return true;
     }
     
-    return false;
+    if (message.action === 'generateSummary' && sender.tab?.id) {
+        const tabId = sender.tab.id;
+        
+        // Important: Don't use await or Promise handling here
+        // Just start the process and acknowledge receipt immediately
+        getSummaryOpenAI(message.transcript, tabId);
+        
+        // Send immediate acknowledgment and close the message channel
+        sendResponse({ success: true, message: 'Summary generation started' });
+        return true;
+    }
+    
+    return false; // No async response needed
 });
 
 // Check API key and initialize client
@@ -125,8 +153,8 @@ async function checkApiKeyAndInitClient() {
     return initResult;
 }
 
-// Handle summarizing process
-async function handleSummarize(videoId: string, sendResponse: (response: any) => void) {
+// Handle summarizing process - now returns a Promise
+async function handleSummarize(videoId: string, sendResponse: (response: any) => void): Promise<void> {
     try {
         // First, check if OpenAI client is initialized
         if (!client) {
@@ -164,7 +192,7 @@ async function handleSummarize(videoId: string, sendResponse: (response: any) =>
             return;
         }
 
-        // Start the summarization process
+        // Send successful response with transcript
         sendResponse({
             success: true,
             action: 'prepareSummary',
@@ -175,7 +203,7 @@ async function handleSummarize(videoId: string, sendResponse: (response: any) =>
         // console.error('Error in handleSummarize:', error);
         sendResponse({
             success: false,
-            error: 'Failed to process video'
+            error: error instanceof Error ? error.message : 'Failed to process video'
         });
     }
 }
@@ -205,16 +233,22 @@ async function getModel(): Promise<string> {
     });
 }
 
-// Summarize transcript using OpenAI
-async function getSummaryOpenAI(transcript: string, tabId: number) {
-    if (!client) {
-        const initResult = await initializeOpenAIClient();
-        if (!initResult.success) {
-            return { success: false, error: initResult.error };
-        }
-    }
-
+// Summarize transcript using OpenAI - now properly handles errors
+async function getSummaryOpenAI(transcript: string, tabId: number): Promise<void> {
     try {
+        if (!client) {
+            const initResult = await initializeOpenAIClient();
+            if (!initResult.success) {
+                // Send error to tab
+                sendTabMessage(tabId, {
+                    action: 'summaryError',
+                    error: initResult.error || 'Failed to initialize OpenAI client',
+                    needsApiKey: true
+                });
+                return;
+            }
+        }
+
         // Get the custom system prompt and selected model
         const systemPrompt = await getSystemPrompt();
         const model = await getModel();
@@ -228,95 +262,103 @@ async function getSummaryOpenAI(transcript: string, tabId: number) {
         // Enhance the user prompt to encourage markdown formatting
         const userPrompt = `Please summarize the following transcript from a YouTube video. Use markdown formatting to structure your response - include headers for main sections, bullet points for key details, and emphasis for important points.\n\n${truncatedTranscript}`;
 
-        // Start stream
-        const stream = await client!.chat.completions.create({
-            model: model,
-            messages: [
-                {
-                    role: 'system',
-                    content: systemPrompt
-                },
-                {
-                    role: 'user',
-                    content: userPrompt
-                }
-            ],
-            stream: true,
-        });
+        try {
+            // Start stream
+            const stream = await client!.chat.completions.create({
+                model: model,
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userPrompt }
+                ],
+                stream: true,
+            });
 
-        // Process stream chunks
-        for await (const chunk of stream) {
-            const content = chunk.choices[0]?.delta?.content || '';
-            if (content) {
-                // Send each chunk to the content script
-                chrome.tabs.sendMessage(tabId, {
-                    action: 'updateSummary',
-                    content: content
+            // Process stream chunks
+            for await (const chunk of stream) {
+                const content = chunk.choices[0]?.delta?.content || '';
+                if (content) {
+                    // Send each chunk to the content script using the safe send method
+                    // Keep streaming even if some chunks fail to send
+                    sendTabMessage(tabId, {
+                        action: 'updateSummary',
+                        content: content
+                    }).catch(err => {
+                        // console.error('Failed to send chunk:', err);
+                        // Continue processing - don't break the loop
+                    });
+                }
+            }
+            
+            // Signal that streaming is complete
+            sendTabMessage(tabId, { action: 'summaryComplete' })
+                .catch(err => {
+                    // console.error('Error sending completion notification:', err);
+                });
+        } catch (error: any) {
+            // console.error('Error with OpenAI API:', error);
+            
+            // Check for 401 error (invalid API key)
+            if (error?.status === 401 || 
+                error?.message?.includes('401') || 
+                error?.message?.includes('Incorrect API key provided')) {
+                
+                // Clear the invalid API key
+                await chrome.storage.sync.remove('openaiApiKey');
+                
+                // Inform user about invalid API key
+                sendTabMessage(tabId, {
+                    action: 'summaryError',
+                    error: 'Invalid API key. Please provide a valid OpenAI API key.',
+                    needsApiKey: true
+                });
+            } else if (error?.message?.includes('does not exist') || 
+                     error?.message?.includes('invalid model')) {
+                // Handle invalid model error
+                sendTabMessage(tabId, {
+                    action: 'summaryError',
+                    error: `Invalid model: "${await getModel()}". Please select a different model in settings.`
+                });
+            } else {
+                // For other errors
+                sendTabMessage(tabId, {
+                    action: 'summaryError',
+                    error: 'Failed to generate summary with OpenAI: ' + (error.message || 'Unknown error')
                 });
             }
         }
-        
-        // Signal that streaming is complete
-        chrome.tabs.sendMessage(tabId, {
-            action: 'summaryComplete'
-        });
-        
-        return { success: true };
-
     } catch (error: any) {
-        // console.error('Error with OpenAI API:', error);
+        // console.error('Unexpected error in getSummaryOpenAI:', error);
         
-        // Check for 401 error (invalid API key)
-        if (error?.status === 401 || 
-            error?.message?.includes('401') || 
-            error?.message?.includes('Incorrect API key provided')) {
-            
-            // Clear the invalid API key
-            chrome.storage.sync.remove('openaiApiKey', () => {
-                console.log('Invalid API key removed from storage');
-            });
-            
-            // Inform user about invalid API key
-            chrome.tabs.sendMessage(tabId, {
-                action: 'summaryError',
-                error: 'Invalid API key. Please provide a valid OpenAI API key.',
-                needsApiKey: true
-            });
-        } else if (error?.message?.includes('does not exist') || 
-                 error?.message?.includes('invalid model')) {
-            // Handle invalid model error
-            chrome.tabs.sendMessage(tabId, {
-                action: 'summaryError',
-                error: `Invalid model: "${await getModel()}". Please select a different model in settings.`
-            });
-        } else {
-            // For other errors
-            chrome.tabs.sendMessage(tabId, {
-                action: 'summaryError',
-                error: 'Failed to generate summary with OpenAI: ' + (error.message || 'Unknown error')
-            });
-        }
-        
-        return { success: false, error: 'API request failed' };
+        // Attempt to notify the content script
+        sendTabMessage(tabId, {
+            action: 'summaryError',
+            error: 'An unexpected error occurred'
+        });
     }
 }
 
-// Add listener for content script requesting an actual summary
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.action === 'generateSummary' && sender.tab?.id) {
-        const tabId = sender.tab.id;
-        getSummaryOpenAI(message.transcript, tabId)
-            .then(result => {
-                sendResponse(result);
-            })
-            .catch(err => {
-                // console.error(err);
-                sendResponse({ success: false, error: 'Summarization process failed' });
+// Helper function to safely send messages to tabs without awaiting responses
+function sendTabMessage(tabId: number, message: any): Promise<void> {
+    return new Promise((resolve, reject) => {
+        // Check if tab exists first to avoid errors with closed tabs
+        chrome.tabs.get(tabId, (tab) => {
+            if (chrome.runtime.lastError) {
+                // Tab doesn't exist anymore
+                resolve(); // Resolve silently, don't reject
+                return;
+            }
+            
+            // Tab exists, try to send message
+            chrome.tabs.sendMessage(tabId, message, (response) => {
+                if (chrome.runtime.lastError) {
+                    // Don't reject on error, just log and continue
+                    console.log('Tab message error (tab may be closed):', chrome.runtime.lastError);
+                }
+                resolve(); // Always resolve, even on error
             });
-        return true; // Keep the message channel open
-    }
-    return false;
-});
+        });
+    });
+}
 
 // Add storage change listener to reset client when API key changes
 chrome.storage.onChanged.addListener((changes, area) => {

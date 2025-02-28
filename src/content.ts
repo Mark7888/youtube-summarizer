@@ -129,32 +129,54 @@ function startSummarization(videoUrl: string) {
     showSummaryOverlay('Loading transcript...');
     updateRegenerateButtonVisibility();
     
-    // Send message to background script
-    chrome.runtime.sendMessage(
-        { action: 'summarize', videoUrl },
-        (response) => {
-            if (!response.success) {
-                if (response.needsApiKey) {
-                    showApiKeyPrompt();
-                } else {
-                    updateSummaryOverlay(`Error: ${response.error || 'Unknown error occurred'}`);
+    // Send message to background script - with proper error handling
+    try {
+        chrome.runtime.sendMessage(
+            { action: 'summarize', videoUrl },
+            (response) => {
+                // Handle potential runtime errors
+                if (chrome.runtime.lastError) {
+                    // console.error('Runtime error:', chrome.runtime.lastError);
+                    updateSummaryOverlay(`Error: ${chrome.runtime.lastError.message || 'Connection failed'}`);
+                    generationState.set(stateKey, false);
+                    updateRegenerateButtonVisibility();
+                    return;
                 }
-                // Mark generation as complete on error
-                generationState.set(stateKey, false);
-                updateRegenerateButtonVisibility();
-                return;
+                
+                if (!response || !response.success) {
+                    if (response?.needsApiKey) {
+                        showApiKeyPrompt();
+                    } else {
+                        updateSummaryOverlay(`Error: ${(response?.error) || 'Unknown error occurred'}`);
+                    }
+                    // Mark generation as complete on error
+                    generationState.set(stateKey, false);
+                    updateRegenerateButtonVisibility();
+                    return;
+                }
+                
+                if (response.action === 'prepareSummary') {
+                    updateSummaryOverlay('Generating summary...');
+                    // Request the actual summary - simplified to avoid waiting for a response
+                    try {
+                        chrome.runtime.sendMessage(
+                            { action: 'generateSummary', transcript: response.transcript }
+                        );
+                    } catch (err) {
+                        // console.error('Error sending generateSummary message:', err);
+                        updateSummaryOverlay('Error: Failed to start summary generation');
+                        generationState.set(stateKey, false);
+                        updateRegenerateButtonVisibility();
+                    }
+                }
             }
-            
-            if (response.action === 'prepareSummary') {
-                updateSummaryOverlay('Generating summary...');
-                // Request the actual summary
-                chrome.runtime.sendMessage(
-                    { action: 'generateSummary', transcript: response.transcript },
-                    () => {}  // Empty callback as we'll handle updates via messages
-                );
-            }
-        }
-    );
+        );
+    } catch (err) {
+        // console.error('Error sending message to background script:', err);
+        updateSummaryOverlay('Error: Failed to communicate with extension background process');
+        generationState.set(stateKey, false);
+        updateRegenerateButtonVisibility();
+    }
 }
 
 // Show API key prompt
@@ -964,69 +986,74 @@ new MutationObserver(() => {
     }
 }).observe(document, { subtree: true, childList: true });
 
-// Listen for messages from background script
+// Listen for messages from background script with proper error handling
 chrome.runtime.onMessage.addListener((message) => {
-    if (message.action === 'updateSummary') {
-        // Get the current tab's key
-        const stateKey = window.location.href;
-        
-        // Get or initialize the markdown content for this page
-        let currentMarkdown = markdownContent.get(stateKey) || '';
-        const content = document.querySelector('.yt-summarizer-content');
-        
-        if (content) {
-            // Check if this is the first chunk (content contains placeholder text)
-            if (content.textContent === 'Generating summary...') {
-                // Start fresh with this first chunk
-                currentMarkdown = message.content;
-            } else {
-                // Append to existing content for subsequent chunks
-                currentMarkdown += message.content;
+    try {
+        if (message.action === 'updateSummary') {
+            // Get the current tab's key
+            const stateKey = window.location.href;
+            
+            // Get or initialize the markdown content for this page
+            let currentMarkdown = markdownContent.get(stateKey) || '';
+            const content = document.querySelector('.yt-summarizer-content');
+            
+            if (content) {
+                // Check if this is the first chunk (content contains placeholder text)
+                if (content.textContent === 'Generating summary...') {
+                    // Start fresh with this first chunk
+                    currentMarkdown = message.content;
+                } else {
+                    // Append to existing content for subsequent chunks
+                    currentMarkdown += message.content;
+                }
+                
+                // Store the updated markdown
+                markdownContent.set(stateKey, currentMarkdown);
+                
+                // Render the updated markdown (now with async handling)
+                updateMarkdownOverlay(currentMarkdown).catch(err => {
+                    // console.error('Error updating markdown overlay:', err);
+                });
             }
-            
-            // Store the updated markdown
-            markdownContent.set(stateKey, currentMarkdown);
-            
-            // Render the updated markdown (now with async handling)
-            updateMarkdownOverlay(currentMarkdown);
         }
-    }
-    
-    if (message.action === 'summaryComplete') {
-        console.log('Summary generation complete');
         
-        // Mark generation as complete
-        const stateKey = window.location.href;
-        generationState.set(stateKey, false);
-        
-        // Update button visibility
-        updateRegenerateButtonVisibility();
-        
-        // Final height adjustment after a small delay to ensure content is fully rendered
-        setTimeout(() => {
-            // Only adjust height if the content is visible (not minimized)
-            const content = document.querySelector('.yt-summarizer-content') as HTMLElement | null;
-            if (content && content.style.display !== 'none') {
-                adjustOverlayHeight();
-            }
-        }, 100);
-    }
-    
-    if (message.action === 'summaryError') {
-        updateSummaryOverlay(`Error: ${message.error || 'Failed to generate summary'}`);
-        
-        // Mark generation as complete on error
-        const stateKey = window.location.href;
-        generationState.set(stateKey, false);
-        updateRegenerateButtonVisibility();
-        
-        // If API key is needed, show the API key prompt
-        if (message.needsApiKey) {
+        if (message.action === 'summaryComplete') {
+            // Mark generation as complete
+            const stateKey = window.location.href;
+            generationState.set(stateKey, false);
+            
+            // Update button visibility
+            updateRegenerateButtonVisibility();
+            
+            // Final height adjustment after a small delay to ensure content is fully rendered
             setTimeout(() => {
-                showApiKeyPrompt();
-            }, 2000); // Show after a short delay so user can read the error
+                // Only adjust height if the content is visible (not minimized)
+                const content = document.querySelector('.yt-summarizer-content') as HTMLElement | null;
+                if (content && content.style.display !== 'none') {
+                    adjustOverlayHeight();
+                }
+            }, 100);
         }
+        
+        if (message.action === 'summaryError') {
+            updateSummaryOverlay(`Error: ${message.error || 'Failed to generate summary'}`);
+            
+            // Mark generation as complete on error
+            const stateKey = window.location.href;
+            generationState.set(stateKey, false);
+            updateRegenerateButtonVisibility();
+            
+            // If API key is needed, show the API key prompt
+            if (message.needsApiKey) {
+                setTimeout(() => {
+                    showApiKeyPrompt();
+                }, 2000); // Show after a short delay so user can read the error
+            }
+        }
+    } catch (err) {
+        // console.error('Error processing message from background script:', err);
     }
     
+    // Always return true (acknowledge receipt) to prevent channel closing errors
     return true;
 });
