@@ -29,7 +29,7 @@ export async function renderMarkdown(text: string): Promise<string> {
         }
         return result;
     } catch (error) {
-        console.error('Error rendering markdown:', error);
+        // console.error('Error rendering markdown:', error);
         return text;
     }
 }

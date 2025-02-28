@@ -11,11 +11,8 @@ function addSummarizeButton() {
     const checkForButtons = setInterval(() => {
         // Look for the top-level-buttons container
         const buttonsContainer = document.querySelector('#actions #actions-inner #menu ytd-menu-renderer #top-level-buttons-computed');
-        console.log('Checking for buttons container...');
-        console.log(buttonsContainer);
 
         if (buttonsContainer) {
-            console.log('Buttons container found');
             clearInterval(checkForButtons);
 
             // Check if our button already exists
@@ -25,7 +22,6 @@ function addSummarizeButton() {
 
             // Find the share button to use as a template
             const shareButton = buttonsContainer.querySelector('yt-button-view-model') as HTMLElement;
-            console.log(shareButton);
             if (!shareButton) return;
 
             // Create a new button element by cloning the share button
@@ -67,8 +63,6 @@ function addSummarizeButton() {
                     const iconObserver = new MutationObserver(() => {
                         iconObserver.disconnect();
 
-                        console.log('Setting icon using mutation observer');
-
                         // Clear the icon element and add our new SVG
                         while (iconElement.firstChild) {
                             iconElement.removeChild(iconElement.firstChild);
@@ -87,8 +81,6 @@ function addSummarizeButton() {
                         iconObserver.disconnect();
 
                         if (!iconElement.querySelector('svg.summarize-icon')) {
-                            console.log('Setting icon using fallback method');
-
                             // Clear the icon element and add our new SVG
                             while (iconElement.firstChild) {
                                 iconElement.removeChild(iconElement.firstChild);
@@ -141,8 +133,6 @@ function startSummarization(videoUrl: string) {
     chrome.runtime.sendMessage(
         { action: 'summarize', videoUrl },
         (response) => {
-            console.log('Response from background:', response);
-            
             if (!response.success) {
                 if (response.needsApiKey) {
                     showApiKeyPrompt();
@@ -729,7 +719,7 @@ async function updateMarkdownOverlay(markdownText: string) {
         // Adjust container height based on content
         setTimeout(() => adjustOverlayHeight(), 10);
     } catch (error) {
-        console.error('Error rendering markdown:', error);
+        // console.error('Error rendering markdown:', error);
         content.textContent = markdownText;
     }
 }
@@ -742,7 +732,7 @@ function copyTextToClipboard() {
     if (markdown) {
         navigator.clipboard.writeText(markdown)
             .catch(err => {
-                console.error('Failed to copy markdown:', err);
+                // console.error('Failed to copy markdown:', err);
             });
     }
 }
@@ -794,7 +784,7 @@ function createCopyButton() {
                     }, 1500);
                 })
                 .catch(err => {
-                    console.error('Could not copy text: ', err);
+                    // console.error('Could not copy text: ', err);
                 });
         }
     });

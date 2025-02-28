@@ -28,7 +28,7 @@ async function initializeOpenAIClient(): Promise<{ success: boolean; error?: str
                     });
                     resolve({ success: true });
                 } catch (error) {
-                    console.error('Error initializing OpenAI client:', error);
+                    // console.error('Error initializing OpenAI client:', error);
                     resolve({ success: false, error: 'Failed to initialize OpenAI client' });
                 }
             } else {
@@ -53,7 +53,7 @@ async function validateApiKey(): Promise<{ valid: boolean; error?: string }> {
         });
         return { valid: true };
     } catch (error: any) {
-        console.error('API key validation error:', error);
+        // console.error('API key validation error:', error);
         
         // Check for 401 error (invalid API key)
         if (error?.status === 401 || 
@@ -172,7 +172,7 @@ async function handleSummarize(videoId: string, sendResponse: (response: any) =>
         });
         
     } catch (error) {
-        console.error('Error in handleSummarize:', error);
+        // console.error('Error in handleSummarize:', error);
         sendResponse({
             success: false,
             error: 'Failed to process video'
@@ -264,7 +264,7 @@ async function getSummaryOpenAI(transcript: string, tabId: number) {
         return { success: true };
 
     } catch (error: any) {
-        console.error('Error with OpenAI API:', error);
+        // console.error('Error with OpenAI API:', error);
         
         // Check for 401 error (invalid API key)
         if (error?.status === 401 || 
@@ -310,7 +310,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 sendResponse(result);
             })
             .catch(err => {
-                console.error(err);
+                // console.error(err);
                 sendResponse({ success: false, error: 'Summarization process failed' });
             });
         return true; // Keep the message channel open
