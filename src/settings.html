@@ -7,9 +7,15 @@
     <style>
         body {
             font-family: Arial, sans-serif;
-            max-width: 500px;
-            margin: 0 auto;
+            width: 400px;
+            margin: 0;
             padding: 20px;
+            background-color: #f9f9f9;
+        }
+        h1 {
+            font-size: 18px;
+            margin-top: 0;
+            color: #333;
         }
         .form-group {
             margin-bottom: 15px;
@@ -17,12 +23,22 @@
         label {
             display: block;
             margin-bottom: 5px;
-            font-weight: bold;
+            font-weight: 600;
+            font-size: 14px;
+            color: #444;
         }
-        input[type="text"] {
+        input[type="text"], textarea {
             width: 100%;
             padding: 8px;
             box-sizing: border-box;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        textarea {
+            min-height: 100px;
+            resize: vertical;
+            font-family: Arial, sans-serif;
         }
         button {
             background-color: #4285f4;
@@ -31,11 +47,18 @@
             padding: 10px 15px;
             cursor: pointer;
             border-radius: 4px;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #3367d6;
         }
         .message {
             margin-top: 15px;
             padding: 10px;
             border-radius: 4px;
+            font-size: 14px;
+            text-align: center;
         }
         .success {
             background-color: #d4edda;
@@ -45,14 +68,35 @@
             background-color: #f8d7da;
             color: #721c24;
         }
+        .note {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+        .divider {
+            height: 1px;
+            background-color: #ddd;
+            margin: 20px 0;
+        }
     </style>
 </head>
 <body>
     <h1>YouTube Summarizer Settings</h1>
+    
     <div class="form-group">
         <label for="apiKey">OpenAI API Key:</label>
         <input type="text" id="apiKey" placeholder="Enter your OpenAI API key">
+        <div class="note">Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI's website</a></div>
     </div>
+    
+    <div class="divider"></div>
+    
+    <div class="form-group">
+        <label for="systemPrompt">System Prompt:</label>
+        <textarea id="systemPrompt" placeholder="Enter the instruction for the AI model"></textarea>
+        <div class="note">This prompt guides how the AI summarizes video transcripts</div>
+    </div>
+    
     <button id="saveBtn">Save Settings</button>
     <div id="message" class="message" style="display: none;"></div>
 

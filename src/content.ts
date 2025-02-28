@@ -173,27 +173,27 @@ function showApiKeyPrompt() {
         background-color: white;
         padding: 20px;
         border-radius: 8px;
-        max-width: 500px;
+        max-width: 400px;
         width: 90%;
+        font-family: Arial, sans-serif;
     `;
     
     modal.innerHTML = `
-        <h2 style="margin-top: 0;">API Key Required</h2>
-        <p>YouTube Summarizer needs your OpenAI API key to function.</p>
+        <h2 style="margin-top: 0; font-size: 18px; color: #333;">API Key Required</h2>
+        <p style="color: #555; font-size: 14px;">YouTube Summarizer needs your OpenAI API key to function.</p>
         <div style="margin-bottom: 15px;">
-            <label for="api-key-input" style="display: block; margin-bottom: 5px;">OpenAI API Key:</label>
+            <label for="api-key-input" style="display: block; margin-bottom: 5px; font-weight: 600; font-size: 14px; color: #444;">OpenAI API Key:</label>
             <input id="api-key-input" type="text" placeholder="Enter your API key" 
-                   style="width: 100%; padding: 8px; box-sizing: border-box;">
+                   style="width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+            <div style="font-size: 12px; color: #666; margin-top: 5px;">
+                Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank" style="color: #4285f4;">OpenAI's website</a>
+            </div>
         </div>
         <div style="display: flex; justify-content: space-between;">
-            <button id="cancel-api-key" style="padding: 8px 16px; cursor: pointer;">Cancel</button>
-            <button id="save-api-key" style="padding: 8px 16px; background-color: #4285f4; color: white; border: none; cursor: pointer;">Save API Key</button>
+            <button id="cancel-api-key" style="padding: 8px 16px; cursor: pointer; border-radius: 4px; border: 1px solid #ddd; background-color: #f5f5f5; font-size: 14px;">Cancel</button>
+            <button id="save-api-key" style="padding: 8px 16px; background-color: #4285f4; color: white; border: none; cursor: pointer; border-radius: 4px; font-size: 14px; font-weight: 500;">Save API Key</button>
         </div>
-        <p style="font-size: 12px; margin-top: 15px;">
-            You can get an API key from 
-            <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI's website</a>.
-        </p>
-        <div id="popup-message" style="margin-top: 10px; padding: 8px; display: none;"></div>
+        <div id="popup-message" style="margin-top: 15px; padding: 10px; border-radius: 4px; font-size: 14px; display: none; text-align: center;"></div>
     `;
     
     overlay.appendChild(modal);

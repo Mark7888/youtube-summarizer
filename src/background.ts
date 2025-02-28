@@ -5,6 +5,9 @@ import { OpenAI } from 'openai';
 
 let client: OpenAI | null = null;
 
+// Default system prompt
+const DEFAULT_SYSTEM_PROMPT = 'You are a helpful assistant that summarizes YouTube video transcripts clearly and concisely. Focus on the main points, key details, and important takeaways.';
+
 // Initialize OpenAI client
 async function initializeOpenAIClient(): Promise<{ success: boolean; error?: string }> {
     return new Promise((resolve) => {
@@ -175,6 +178,15 @@ function extractVideoId(url: string): string | null {
     return (match && match[2].length === 11) ? match[2] : null;
 }
 
+// Get system prompt from storage or use default
+async function getSystemPrompt(): Promise<string> {
+    return new Promise((resolve) => {
+        chrome.storage.sync.get('systemPrompt', (result) => {
+            resolve(result.systemPrompt || DEFAULT_SYSTEM_PROMPT);
+        });
+    });
+}
+
 // Summarize transcript using OpenAI GPT-4o-mini
 async function getSummaryOpenAI(transcript: string, tabId: number) {
     if (!client) {
@@ -185,6 +197,9 @@ async function getSummaryOpenAI(transcript: string, tabId: number) {
     }
 
     try {
+        // Get the custom system prompt
+        const systemPrompt = await getSystemPrompt();
+
         // Truncate transcript if it's too long
         const maxLength = 15000;
         const truncatedTranscript = transcript.length > maxLength 
@@ -197,7 +212,7 @@ async function getSummaryOpenAI(transcript: string, tabId: number) {
             messages: [
                 {
                     role: 'system',
-                    content: 'You are a helpful assistant that summarizes YouTube video transcripts clearly and concisely. Focus on the main points, key details, and important takeaways.'
+                    content: systemPrompt
                 },
                 {
                     role: 'user',
