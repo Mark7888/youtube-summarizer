@@ -56,8 +56,11 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: youtube-summarizer-chrome
-          path: youtube-summarizer-chrome.zip
+          path: youtube-summarizer-chrome
       
+      - name: Zip the youtube-summarizer-chrome folder
+        run: zip -r youtube-summarizer-chrome.zip youtube-summarizer-chrome
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
