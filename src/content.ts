@@ -538,6 +538,7 @@ function makeDraggable(element: HTMLElement, dragHandle: HTMLElement, pinButton?
         }
         
         e.preventDefault();
+        
         // Get the mouse cursor position at startup
         pos3 = e.clientX;
         pos4 = e.clientY;
@@ -549,42 +550,47 @@ function makeDraggable(element: HTMLElement, dragHandle: HTMLElement, pinButton?
     
     function elementDrag(e: MouseEvent) {
         e.preventDefault();
+        
         // Calculate the new cursor position
         pos1 = pos3 - e.clientX;
         pos2 = pos4 - e.clientY;
         pos3 = e.clientX;
         pos4 = e.clientY;
         
-        // Ensure the element stays within viewport bounds
+        // Always convert to fixed positioning if it's not already
+        if (element.style.position !== 'fixed') {
+            const rect = element.getBoundingClientRect();
+            element.style.top = rect.top + "px";
+            element.style.left = rect.left + "px";
+            element.style.bottom = 'auto';
+            element.style.right = 'auto';
+            element.style.position = 'fixed';
+        }
+        
+        // Calculate new viewport-relative position (fixed positioning)
         const newTop = element.offsetTop - pos2;
         const newLeft = element.offsetLeft - pos1;
+        
+        // Ensure the element stays within viewport bounds
         const maxLeft = window.innerWidth - element.offsetWidth;
         const maxTop = window.innerHeight - element.offsetHeight;
         
-        // Set the element's new position with bounds checking
+        // Apply new position with bounds checking
         element.style.top = Math.min(Math.max(0, newTop), maxTop) + "px";
         element.style.left = Math.min(Math.max(0, newLeft), maxLeft) + "px";
         
-        // After moving, fix the position to be absolute rather than fixed
-        if (element.style.position === 'fixed') {
-            const rect = element.getBoundingClientRect();
-            element.style.position = 'absolute';
-            element.style.top = rect.top + window.scrollY + "px";
-            element.style.left = rect.left + window.scrollX + "px";
-            element.style.bottom = 'auto';
-            element.style.right = 'auto';
-            
-            // This marks that we've moved from the original position
+        // Mark as moved and activate pin button
+        if (!hasMoved) {
             hasMoved = true;
-        }
-        
-        // Activate pin button after movement (if provided)
-        if (pinButton && !pinButton.classList.contains('active')) {
-            pinButton.style.opacity = '1';
-            pinButton.style.cursor = 'pointer';
-            pinButton.style.pointerEvents = 'auto';
-            pinButton.querySelector('svg')?.setAttribute('fill', '#555');
-            pinButton.classList.add('active'); // Mark as activated
+            
+            // Activate pin button after movement (if provided)
+            if (pinButton && !pinButton.classList.contains('active')) {
+                pinButton.style.opacity = '1';
+                pinButton.style.cursor = 'pointer';
+                pinButton.style.pointerEvents = 'auto';
+                pinButton.querySelector('svg')?.setAttribute('fill', '#555');
+                pinButton.classList.add('active'); // Mark as activated
+            }
         }
     }
     
@@ -594,12 +600,29 @@ function makeDraggable(element: HTMLElement, dragHandle: HTMLElement, pinButton?
         document.onmousemove = null;
     }
     
+    // No scroll handler needed for fixed positioning as it stays in position
+    
+    // Clean up when element is removed
+    const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+            if (mutation.type === 'childList' && mutation.removedNodes.length > 0) {
+                for (const node of Array.from(mutation.removedNodes)) {
+                    if (node === element) {
+                        observer.disconnect();
+                    }
+                }
+            }
+        });
+    });
+    
+    observer.observe(document.body, { childList: true });
+    
     // If we have a pin button, set up its click handler here
     if (pinButton) {
         pinButton.addEventListener('click', function() {
             // Only respond if the button is active (meaning we've moved)
             if (this.classList.contains('active')) {
-                // Reset to original position
+                // Reset to original position (fixed bottom-right)
                 element.style.position = 'fixed';
                 element.style.top = 'auto';
                 element.style.left = 'auto';
@@ -829,15 +852,16 @@ function addResizeHandles(element: HTMLElement) {
             // Initial element dimensions and position
             const startWidth = element.offsetWidth;
             const startHeight = element.offsetHeight;
-            const startLeft = element.offsetLeft;
-            const startTop = element.offsetTop;
             
-            // Convert to absolute positioning if using fixed
-            if (element.style.position === 'fixed') {
-                const rect = element.getBoundingClientRect();
-                element.style.position = 'absolute';
-                element.style.top = rect.top + window.scrollY + "px";
-                element.style.left = rect.left + window.scrollX + "px";
+            // Convert rect coordinates to match fixed positioning
+            let startLeft = element.getBoundingClientRect().left;
+            let startTop = element.getBoundingClientRect().top;
+            
+            // If we're not using fixed positioning, convert to fixed
+            if (element.style.position !== 'fixed') {
+                element.style.position = 'fixed';
+                element.style.top = startTop + "px";
+                element.style.left = startLeft + "px";
                 element.style.bottom = 'auto';
                 element.style.right = 'auto';
             }
