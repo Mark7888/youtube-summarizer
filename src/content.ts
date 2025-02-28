@@ -1,3 +1,6 @@
+// Add a state tracker for generation process
+const generationState = new Map<string, boolean>();
+
 function addSummarizeButton() {
     // Wait for the buttons container to be available
     const checkForButtons = setInterval(() => {
@@ -119,8 +122,15 @@ function addSummarizeButton() {
 
 // Start the summarization process
 function startSummarization(videoUrl: string) {
+    // Get tab ID-based key for tracking state
+    const stateKey = window.location.href;
+    
+    // Set this tab as currently generating
+    generationState.set(stateKey, true);
+    
     // Show loading overlay
     showSummaryOverlay('Loading transcript...');
+    updateRegenerateButtonVisibility();
     
     // Send message to background script
     chrome.runtime.sendMessage(
@@ -134,6 +144,9 @@ function startSummarization(videoUrl: string) {
                 } else {
                     updateSummaryOverlay(`Error: ${response.error || 'Unknown error occurred'}`);
                 }
+                // Mark generation as complete on error
+                generationState.set(stateKey, false);
+                updateRegenerateButtonVisibility();
                 return;
             }
             
@@ -250,7 +263,7 @@ function showApiKeyPrompt() {
     });
 }
 
-// Create and show the summary overlay
+// Create and show the summary overlay with additional buttons
 function showSummaryOverlay(initialText: string = '') {
     // Remove any existing overlay
     const existingOverlay = document.querySelector('.yt-summarizer-overlay');
@@ -287,10 +300,105 @@ function showSummaryOverlay(initialText: string = '') {
         border-radius: 8px 8px 0 0;
     `;
     
+    // Left side - title and action buttons
+    const headerLeft = document.createElement('div');
+    headerLeft.style.cssText = `
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    `;
+    
+    // Title
     const title = document.createElement('h3');
     title.textContent = 'Video Summary';
     title.style.margin = '0';
+    headerLeft.appendChild(title);
     
+    // Copy button
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'yt-summarizer-copy-btn';
+    copyBtn.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 0 24 24" fill="#555">
+            <path d="M16 1H4C2.9 1 2 1.9 2 3v14h2V3h12V1zm3 4H8C6.9 5 6 5.9 6 7v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+        </svg>
+    `;
+    copyBtn.title = "Copy to clipboard";
+    copyBtn.style.cssText = `
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 3px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0.7;
+        transition: opacity 0.2s;
+    `;
+    copyBtn.addEventListener('mouseover', () => {
+        copyBtn.style.opacity = '1';
+    });
+    copyBtn.addEventListener('mouseout', () => {
+        copyBtn.style.opacity = '0.7';
+    });
+    copyBtn.addEventListener('click', () => {
+        const content = document.querySelector('.yt-summarizer-content');
+        if (content && content.textContent) {
+            navigator.clipboard.writeText(content.textContent)
+                .then(() => {
+                    // Visual feedback for copy
+                    const originalInnerHTML = copyBtn.innerHTML;
+                    copyBtn.innerHTML = `
+                        <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 0 24 24" fill="#4CAF50">
+                            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                        </svg>
+                    `;
+                    setTimeout(() => {
+                        copyBtn.innerHTML = originalInnerHTML;
+                    }, 1500);
+                })
+                .catch(err => {
+                    console.error('Could not copy text: ', err);
+                });
+        }
+    });
+    headerLeft.appendChild(copyBtn);
+    
+    // Regenerate button (refresh icon)
+    const regenerateBtn = document.createElement('button');
+    regenerateBtn.className = 'yt-summarizer-regenerate-btn';
+    regenerateBtn.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 0 24 24" fill="#555">
+            <path d="M17.65 6.35c-1.63-1.63-3.94-2.57-6.48-2.31-3.67.37-6.69 3.35-7.1 7.02C3.52 15.91 7.27 20 12 20c3.19 0 5.93-1.87 7.21-4.56.32-.67-.16-1.44-.9-1.44-.37 0-.72.2-.88.53-1.13 2.43-3.84 3.97-6.8 3.31-2.22-.49-4.01-2.3-4.48-4.52-.82-3.88 2.24-7.32 5.95-7.32 1.57 0 2.97.6 4.05 1.56L13 10h9V1l-4.35 4.35z"/>
+        </svg>
+    `;
+    regenerateBtn.title = "Regenerate summary";
+    regenerateBtn.style.cssText = `
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 3px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0.7;
+        transition: opacity 0.2s;
+        visibility: hidden;
+    `;
+    regenerateBtn.addEventListener('mouseover', () => {
+        regenerateBtn.style.opacity = '1';
+    });
+    regenerateBtn.addEventListener('mouseout', () => {
+        regenerateBtn.style.opacity = '0.7';
+    });
+    regenerateBtn.addEventListener('click', () => {
+        const videoUrl = window.location.href;
+        startSummarization(videoUrl);
+    });
+    headerLeft.appendChild(regenerateBtn);
+    
+    // Right side - close button
     const closeBtn = document.createElement('button');
     closeBtn.innerHTML = '&times;';
     closeBtn.style.cssText = `
@@ -300,9 +408,14 @@ function showSummaryOverlay(initialText: string = '') {
         cursor: pointer;
         padding: 0 5px;
     `;
-    closeBtn.onclick = () => overlay.remove();
+    closeBtn.onclick = () => {
+        overlay.remove();
+        // Clear generation state when closing
+        generationState.delete(window.location.href);
+    };
     
-    header.appendChild(title);
+    // Assemble header
+    header.appendChild(headerLeft);
     header.appendChild(closeBtn);
     
     // Create content area
@@ -319,6 +432,21 @@ function showSummaryOverlay(initialText: string = '') {
     overlay.appendChild(header);
     overlay.appendChild(content);
     document.body.appendChild(overlay);
+    
+    // Update regenerate button visibility based on current state
+    updateRegenerateButtonVisibility();
+}
+
+// Function to update regenerate button visibility
+function updateRegenerateButtonVisibility() {
+    const regenerateBtn = document.querySelector('.yt-summarizer-regenerate-btn') as HTMLButtonElement;
+    if (!regenerateBtn) return;
+    
+    const stateKey = window.location.href;
+    const isGenerating = generationState.get(stateKey) === true;
+    
+    regenerateBtn.style.visibility = isGenerating ? 'hidden' : 'visible';
+    regenerateBtn.disabled = isGenerating;
 }
 
 // Update the content of the summary overlay
@@ -356,16 +484,35 @@ chrome.runtime.onMessage.addListener((message) => {
         // Append the new content to the summary
         const content = document.querySelector('.yt-summarizer-content');
         if (content) {
-            content.textContent += message.content;
+            // Check if this is the first chunk (content contains placeholder text)
+            if (content.textContent === 'Generating summary...') {
+                // Clear the placeholder text for the first chunk
+                content.textContent = message.content;
+            } else {
+                // Append to existing content for subsequent chunks
+                content.textContent += message.content;
+            }
         }
     }
     
     if (message.action === 'summaryComplete') {
         console.log('Summary generation complete');
+        
+        // Mark generation as complete
+        const stateKey = window.location.href;
+        generationState.set(stateKey, false);
+        
+        // Update button visibility
+        updateRegenerateButtonVisibility();
     }
     
     if (message.action === 'summaryError') {
         updateSummaryOverlay(`Error: ${message.error || 'Failed to generate summary'}`);
+        
+        // Mark generation as complete on error
+        const stateKey = window.location.href;
+        generationState.set(stateKey, false);
+        updateRegenerateButtonVisibility();
         
         // If API key is needed, show the API key prompt
         if (message.needsApiKey) {
