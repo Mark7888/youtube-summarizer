@@ -27,7 +27,7 @@
             font-size: 14px;
             color: #444;
         }
-        input[type="text"], textarea {
+        input[type="text"], textarea, select {
             width: 100%;
             padding: 8px;
             box-sizing: border-box;
@@ -78,6 +78,16 @@
             background-color: #ddd;
             margin: 20px 0;
         }
+        .model-container {
+            margin-bottom: 15px;
+        }
+        #customModelContainer {
+            margin-top: 10px;
+            display: none;
+        }
+        select {
+            background-color: white;
+        }
     </style>
 </head>
 <body>
@@ -87,6 +97,23 @@
         <label for="apiKey">OpenAI API Key:</label>
         <input type="text" id="apiKey" placeholder="Enter your OpenAI API key">
         <div class="note">Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI's website</a></div>
+    </div>
+    
+    <div class="divider"></div>
+    
+    <div class="form-group">
+        <label for="modelSelect">Model:</label>
+        <div class="model-container">
+            <select id="modelSelect">
+                <!-- Will be populated dynamically -->
+                <option value="custom">Custom model...</option>
+            </select>
+            
+            <div id="customModelContainer">
+                <input type="text" id="customModel" placeholder="Enter custom model name">
+            </div>
+        </div>
+        <div class="note">Select the OpenAI model to use for summarization</div>
     </div>
     
     <div class="divider"></div>

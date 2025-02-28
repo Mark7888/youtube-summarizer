@@ -8,6 +8,15 @@ let client: OpenAI | null = null;
 // Default system prompt
 const DEFAULT_SYSTEM_PROMPT = 'You are a helpful assistant that summarizes YouTube video transcripts clearly and concisely. Focus on the main points, key details, and important takeaways.';
 
+// Available models
+const AVAILABLE_MODELS = [
+    'gpt-4o-mini'
+    // Add more models here as needed
+];
+
+// Default model to use
+const DEFAULT_MODEL = 'gpt-4o-mini';
+
 // Initialize OpenAI client
 async function initializeOpenAIClient(): Promise<{ success: boolean; error?: string }> {
     return new Promise((resolve) => {
@@ -187,7 +196,16 @@ async function getSystemPrompt(): Promise<string> {
     });
 }
 
-// Summarize transcript using OpenAI GPT-4o-mini
+// Get model from storage or use default
+async function getModel(): Promise<string> {
+    return new Promise((resolve) => {
+        chrome.storage.sync.get('model', (result) => {
+            resolve(result.model || DEFAULT_MODEL);
+        });
+    });
+}
+
+// Summarize transcript using OpenAI
 async function getSummaryOpenAI(transcript: string, tabId: number) {
     if (!client) {
         const initResult = await initializeOpenAIClient();
@@ -197,8 +215,9 @@ async function getSummaryOpenAI(transcript: string, tabId: number) {
     }
 
     try {
-        // Get the custom system prompt
+        // Get the custom system prompt and selected model
         const systemPrompt = await getSystemPrompt();
+        const model = await getModel();
 
         // Truncate transcript if it's too long
         const maxLength = 15000;
@@ -208,7 +227,7 @@ async function getSummaryOpenAI(transcript: string, tabId: number) {
         
         // Start stream
         const stream = await client!.chat.completions.create({
-            model: 'gpt-4o-mini',
+            model: model,
             messages: [
                 {
                     role: 'system',
@@ -259,6 +278,13 @@ async function getSummaryOpenAI(transcript: string, tabId: number) {
                 action: 'summaryError',
                 error: 'Invalid API key. Please provide a valid OpenAI API key.',
                 needsApiKey: true
+            });
+        } else if (error?.message?.includes('does not exist') || 
+                 error?.message?.includes('invalid model')) {
+            // Handle invalid model error
+            chrome.tabs.sendMessage(tabId, {
+                action: 'summaryError',
+                error: `Invalid model: "${await getModel()}". Please select a different model in settings.`
             });
         } else {
             // For other errors
