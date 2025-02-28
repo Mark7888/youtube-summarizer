@@ -43,6 +43,8 @@ jobs:
     name: Create Release
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     
     steps:
@@ -54,9 +56,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: youtube-summarizer-chrome
+          path: youtube-summarizer-chrome.zip
       
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           name: Release ${{ steps.get_tag.outputs.tag }}
           files: youtube-summarizer-chrome.zip
