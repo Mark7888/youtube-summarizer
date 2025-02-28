@@ -88,6 +88,23 @@
         select {
             background-color: white;
         }
+        
+        /* Style for default option */
+        option[selected] {
+            font-weight: bold;
+            background-color: #f0f7ff;
+        }
+        
+        /* This ensures the styling is consistent across browsers */
+        select option:checked {
+            box-shadow: 0 0 10px 100px #f0f7ff inset;
+        }
+        
+        /* Highlight the default option when dropdown is open */
+        select option[value="gpt-4o-mini"] {
+            background-color: #f0f7ff;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
