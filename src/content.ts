@@ -286,9 +286,9 @@ function showSummaryOverlay(initialText: string = '') {
         width: 25%;
         max-width: 550px;
         min-width: 350px;
-        height: 40%;
+        height: auto; /* Dynamic height */
+        min-height: 100px; /* Smaller initial height */
         max-height: 600px;
-        min-height: 300px;
         background-color: white;
         box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
         border-radius: 8px;
@@ -392,6 +392,7 @@ function showSummaryOverlay(initialText: string = '') {
         overflow-y: auto;
         flex-grow: 1;
         overflow-wrap: break-word;
+        max-height: 500px; /* Keep scrollable area if content is long */
     `;
     
     // Add markdown styles
@@ -402,6 +403,8 @@ function showSummaryOverlay(initialText: string = '') {
     // Set initial content
     if (initialText) {
         content.textContent = initialText;
+        // Schedule a height adjustment after content is set
+        setTimeout(() => adjustOverlayHeight(), 10);
     }
     
     // Assemble overlay
@@ -411,6 +414,36 @@ function showSummaryOverlay(initialText: string = '') {
     
     // Update regenerate button visibility based on current state
     updateRegenerateButtonVisibility();
+}
+
+// New function to adjust the overlay's height based on content
+function adjustOverlayHeight() {
+    const overlay = document.querySelector('.yt-summarizer-overlay') as HTMLElement;
+    const content = document.querySelector('.yt-summarizer-content') as HTMLElement;
+    const header = overlay?.querySelector('div') as HTMLElement; // First div is the header
+    
+    if (!overlay || !content || !header) return;
+    
+    // Get the actual content height
+    const contentHeight = content.scrollHeight;
+    
+    // Get header height
+    const headerHeight = header.offsetHeight;
+    
+    // Calculate the total desired height with some padding
+    const padding = 30;
+    const desiredHeight = contentHeight + headerHeight + padding;
+    
+    // Set limits
+    const minHeight = 100;
+    const maxHeight = 600;
+    
+    // Apply the calculated height within constraints
+    const newHeight = Math.min(Math.max(desiredHeight, minHeight), maxHeight);
+    overlay.style.height = `${newHeight}px`;
+    
+    // Only show scrollbar if needed
+    content.style.overflowY = contentHeight > (newHeight - headerHeight - padding) ? 'auto' : 'hidden';
 }
 
 // Function to update regenerate button visibility
@@ -439,6 +472,9 @@ function updateSummaryOverlay(text: string, append: boolean = false) {
             // Reset markdown content for this page
             markdownContent.set(window.location.href, text);
         }
+        
+        // Adjust container height based on content
+        setTimeout(() => adjustOverlayHeight(), 10);
     } else {
         // If overlay doesn't exist yet, create it
         showSummaryOverlay(text);
@@ -457,6 +493,9 @@ async function updateMarkdownOverlay(markdownText: string) {
         
         // Update the content
         content.innerHTML = safeHtml;
+        
+        // Adjust container height based on content
+        setTimeout(() => adjustOverlayHeight(), 10);
     } catch (error) {
         console.error('Error rendering markdown:', error);
         content.textContent = markdownText;
@@ -581,6 +620,9 @@ chrome.runtime.onMessage.addListener((message) => {
         
         // Update button visibility
         updateRegenerateButtonVisibility();
+        
+        // Final height adjustment after a small delay to ensure content is fully rendered
+        setTimeout(() => adjustOverlayHeight(), 100);
     }
     
     if (message.action === 'summaryError') {
