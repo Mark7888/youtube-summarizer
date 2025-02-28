@@ -1,0 +1,71 @@
+name: Build and Release
+
+on:
+  push:
+    branches: ["*"]
+    tags: ["v*"]
+  pull_request:
+    branches: ["*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Extension
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'yarn'
+          
+      - name: Install dependencies
+        run: yarn install
+        
+      - name: Build extension
+        run: yarn build
+        
+      - name: Rename dist directory
+        run: mv dist youtube-summarizer-chrome
+        
+      - name: Create ZIP archive
+        run: |
+          zip -r youtube-summarizer-chrome.zip youtube-summarizer-chrome
+          
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-summarizer-chrome
+          path: youtube-summarizer-chrome.zip
+          retention-days: 7
+
+  release:
+    name: Create Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Get tag name
+        id: get_tag
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: youtube-summarizer-chrome
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ steps.get_tag.outputs.tag }}
+          files: youtube-summarizer-chrome.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
