@@ -9,7 +9,7 @@ let client: OpenAI | null = null;
 async function initializeOpenAIClient(): Promise<{ success: boolean; error?: string }> {
     return new Promise((resolve) => {
         chrome.storage.sync.get(['openaiApiKey'], (result) => {
-            if (result.openaiApiKey) {
+            if (result.openaiApiKey && result.openaiApiKey.trim() !== '') {
                 try {
                     client = new OpenAI({
                         apiKey: result.openaiApiKey,
@@ -24,6 +24,40 @@ async function initializeOpenAIClient(): Promise<{ success: boolean; error?: str
             }
         });
     });
+}
+
+// Function to validate API key with a simple test request
+async function validateApiKey(): Promise<{ valid: boolean; error?: string }> {
+    if (!client) {
+        return { valid: false, error: 'Client not initialized' };
+    }
+
+    try {
+        // Make a minimal API call to check if the key is valid
+        await client.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [{ role: 'user', content: 'test' }],
+            max_tokens: 1 // Minimize token usage for the test
+        });
+        return { valid: true };
+    } catch (error: any) {
+        console.error('API key validation error:', error);
+        
+        // Check for 401 error (invalid API key)
+        if (error?.status === 401 || 
+            error?.message?.includes('401') || 
+            error?.message?.includes('Incorrect API key provided')) {
+            
+            // Clear the invalid API key
+            chrome.storage.sync.remove('openaiApiKey', () => {
+                console.log('Invalid API key removed from storage');
+            });
+            
+            return { valid: false, error: 'Invalid API key' };
+        }
+        
+        return { valid: true }; // Other errors might be temporary or unrelated to the key
+    }
 }
 
 // Listen for messages from content script
@@ -50,13 +84,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true; // Keep the message channel open for async responses
     }
     
+    if (message.action === 'resetApiClient') {
+        // Reset the client to force reinitialization with the new API key
+        client = null;
+        console.log('OpenAI client reset');
+        
+        if (sendResponse) {
+            sendResponse({ success: true });
+        }
+        return true;
+    }
+    
     return false;
 });
 
 // Check API key and initialize client
 async function checkApiKeyAndInitClient() {
-    const result = await initializeOpenAIClient();
-    return result;
+    const initResult = await initializeOpenAIClient();
+    
+    if (initResult.success) {
+        // Validate the API key if initialization was successful
+        const validationResult = await validateApiKey();
+        if (!validationResult.valid) {
+            return { success: false, error: validationResult.error, needsApiKey: true };
+        }
+    }
+    
+    return initResult;
 }
 
 // Handle summarizing process
@@ -69,6 +123,17 @@ async function handleSummarize(videoId: string, sendResponse: (response: any) =>
                 sendResponse({ 
                     success: false, 
                     error: initResult.error || 'No API key found',
+                    needsApiKey: true 
+                });
+                return;
+            }
+            
+            // Validate the API key
+            const validationResult = await validateApiKey();
+            if (!validationResult.valid) {
+                sendResponse({ 
+                    success: false, 
+                    error: validationResult.error || 'Invalid API key',
                     needsApiKey: true 
                 });
                 return;
@@ -161,12 +226,33 @@ async function getSummaryOpenAI(transcript: string, tabId: number) {
         
         return { success: true };
 
-    } catch (error) {
+    } catch (error: any) {
         console.error('Error with OpenAI API:', error);
-        chrome.tabs.sendMessage(tabId, {
-            action: 'summaryError',
-            error: 'Failed to generate summary with OpenAI'
-        });
+        
+        // Check for 401 error (invalid API key)
+        if (error?.status === 401 || 
+            error?.message?.includes('401') || 
+            error?.message?.includes('Incorrect API key provided')) {
+            
+            // Clear the invalid API key
+            chrome.storage.sync.remove('openaiApiKey', () => {
+                console.log('Invalid API key removed from storage');
+            });
+            
+            // Inform user about invalid API key
+            chrome.tabs.sendMessage(tabId, {
+                action: 'summaryError',
+                error: 'Invalid API key. Please provide a valid OpenAI API key.',
+                needsApiKey: true
+            });
+        } else {
+            // For other errors
+            chrome.tabs.sendMessage(tabId, {
+                action: 'summaryError',
+                error: 'Failed to generate summary with OpenAI: ' + (error.message || 'Unknown error')
+            });
+        }
+        
         return { success: false, error: 'API request failed' };
     }
 }
@@ -186,4 +272,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true; // Keep the message channel open
     }
     return false;
+});
+
+// Add storage change listener to reset client when API key changes
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'sync' && changes.openaiApiKey) {
+        console.log('API key changed, resetting client');
+        client = null;
+    }
 });

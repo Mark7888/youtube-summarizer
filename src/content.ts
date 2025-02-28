@@ -193,6 +193,7 @@ function showApiKeyPrompt() {
             You can get an API key from 
             <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI's website</a>.
         </p>
+        <div id="popup-message" style="margin-top: 10px; padding: 8px; display: none;"></div>
     `;
     
     overlay.appendChild(modal);
@@ -207,18 +208,44 @@ function showApiKeyPrompt() {
     document.getElementById('save-api-key')?.addEventListener('click', () => {
         const apiKeyInput = document.getElementById('api-key-input') as HTMLInputElement;
         const apiKey = apiKeyInput.value.trim();
+        const messageEl = document.getElementById('popup-message');
         
         if (!apiKey) {
-            alert('Please enter a valid API key');
+            if (messageEl) {
+                messageEl.textContent = 'Please enter a valid API key';
+                messageEl.style.display = 'block';
+                messageEl.style.backgroundColor = '#f8d7da';
+                messageEl.style.color = '#721c24';
+            } else {
+                alert('Please enter a valid API key');
+            }
             return;
         }
         
         // Save API key
         chrome.storage.sync.set({ openaiApiKey: apiKey }, () => {
-            document.body.removeChild(overlay);
-            // Try to summarize again
-            const videoUrl = window.location.href;
-            startSummarization(videoUrl);
+            if (messageEl) {
+                messageEl.textContent = 'API key saved successfully!';
+                messageEl.style.display = 'block';
+                messageEl.style.backgroundColor = '#d4edda';
+                messageEl.style.color = '#155724';
+                
+                // Hide the message after 1.5 seconds and close the popup
+                setTimeout(() => {
+                    document.body.removeChild(overlay);
+                    // Try to summarize again
+                    const videoUrl = window.location.href;
+                    startSummarization(videoUrl);
+                }, 1500);
+            } else {
+                document.body.removeChild(overlay);
+                // Try to summarize again
+                const videoUrl = window.location.href;
+                startSummarization(videoUrl);
+            }
+            
+            // Reset the OpenAI client in the background script
+            chrome.runtime.sendMessage({ action: 'resetApiClient' });
         });
     });
 }
@@ -339,6 +366,13 @@ chrome.runtime.onMessage.addListener((message) => {
     
     if (message.action === 'summaryError') {
         updateSummaryOverlay(`Error: ${message.error || 'Failed to generate summary'}`);
+        
+        // If API key is needed, show the API key prompt
+        if (message.needsApiKey) {
+            setTimeout(() => {
+                showApiKeyPrompt();
+            }, 2000); // Show after a short delay so user can read the error
+        }
     }
     
     return true;

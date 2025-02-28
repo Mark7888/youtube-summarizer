@@ -12,17 +12,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Save API key
     saveBtn.addEventListener('click', () => {
-        const apiKey = apiKeyInput.value.trim();
+        saveApiKey(apiKeyInput.value);
+    });
+
+    function saveApiKey(apiKey: string) {
+        const trimmedKey = apiKey.trim();
         
-        if (!apiKey) {
+        if (!trimmedKey) {
             showMessage('Please enter your OpenAI API key', 'error');
             return;
         }
 
-        chrome.storage.sync.set({ openaiApiKey: apiKey }, () => {
+        chrome.storage.sync.set({ openaiApiKey: trimmedKey }, () => {
             showMessage('API key saved successfully', 'success');
+            
+            // Reset the OpenAI client in the background script
+            chrome.runtime.sendMessage({ action: 'resetApiClient' });
         });
-    });
+    }
 
     function showMessage(text: string, type: 'success' | 'error') {
         messageDiv.textContent = text;
