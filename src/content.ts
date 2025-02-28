@@ -364,13 +364,37 @@ function showSummaryOverlay(initialText: string = '') {
     });
     headerLeft.appendChild(regenerateBtn);
     
-    // Right side - minimize and close buttons
+    // Right side - pin, minimize and close buttons
     const headerRight = document.createElement('div');
     headerRight.style.cssText = `
         display: flex;
         align-items: center;
         gap: 8px;
     `;
+    
+    // Pin button (to restore to original position)
+    const pinBtn = document.createElement('button');
+    pinBtn.className = 'yt-summarizer-pin-btn';
+    pinBtn.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 0 24 24" fill="#aaa">
+            <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/>
+        </svg>
+    `;
+    pinBtn.title = "Reset position to bottom-right";
+    pinBtn.style.cssText = `
+        background: none;
+        border: none;
+        cursor: default;
+        padding: 3px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0.5;
+        transition: opacity 0.2s;
+        pointer-events: none;
+    `;
+    
+    headerRight.appendChild(pinBtn);
     
     // Minimize/Maximize button
     const minimizeBtn = document.createElement('button');
@@ -489,21 +513,30 @@ function showSummaryOverlay(initialText: string = '') {
     // Add resize handles
     addResizeHandles(overlay);
     
-    // Make the overlay draggable
-    makeDraggable(overlay, header);
+    // Make the overlay draggable with pin functionality
+    makeDraggable(overlay, header, pinBtn);
     
     // Update regenerate button visibility based on current state
     updateRegenerateButtonVisibility();
 }
 
-// Function to make an element draggable
-function makeDraggable(element: HTMLElement, dragHandle: HTMLElement) {
+// Function to make an element draggable with pin button support
+function makeDraggable(element: HTMLElement, dragHandle: HTMLElement, pinButton?: HTMLElement) {
     let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+    let hasMoved = false;
     
     // Get the position of the mouse cursor, initialize drag sequence
     dragHandle.onmousedown = dragMouseDown;
     
     function dragMouseDown(e: MouseEvent) {
+        // Don't start drag if we're clicking on a button or other interactive element
+        if ((e.target as HTMLElement).tagName === 'BUTTON' || 
+            (e.target as HTMLElement).closest('button') ||
+            (e.target as HTMLElement).tagName === 'svg' || 
+            (e.target as HTMLElement).tagName === 'path') {
+            return;
+        }
+        
         e.preventDefault();
         // Get the mouse cursor position at startup
         pos3 = e.clientX;
@@ -540,6 +573,18 @@ function makeDraggable(element: HTMLElement, dragHandle: HTMLElement) {
             element.style.left = rect.left + window.scrollX + "px";
             element.style.bottom = 'auto';
             element.style.right = 'auto';
+            
+            // This marks that we've moved from the original position
+            hasMoved = true;
+        }
+        
+        // Activate pin button after movement (if provided)
+        if (pinButton && !pinButton.classList.contains('active')) {
+            pinButton.style.opacity = '1';
+            pinButton.style.cursor = 'pointer';
+            pinButton.style.pointerEvents = 'auto';
+            pinButton.querySelector('svg')?.setAttribute('fill', '#555');
+            pinButton.classList.add('active'); // Mark as activated
         }
     }
     
@@ -547,6 +592,31 @@ function makeDraggable(element: HTMLElement, dragHandle: HTMLElement) {
         // Stop moving when mouse button is released
         document.onmouseup = null;
         document.onmousemove = null;
+    }
+    
+    // If we have a pin button, set up its click handler here
+    if (pinButton) {
+        pinButton.addEventListener('click', function() {
+            // Only respond if the button is active (meaning we've moved)
+            if (this.classList.contains('active')) {
+                // Reset to original position
+                element.style.position = 'fixed';
+                element.style.top = 'auto';
+                element.style.left = 'auto';
+                element.style.bottom = '20px';
+                element.style.right = '20px';
+                
+                // Reset the pin button state
+                this.style.opacity = '0.5';
+                this.style.cursor = 'default';
+                this.style.pointerEvents = 'none';
+                this.querySelector('svg')?.setAttribute('fill', '#aaa');
+                this.classList.remove('active');
+                
+                // Reset the moved state
+                hasMoved = false;
+            }
+        });
     }
 }
 
