@@ -6,7 +6,7 @@ import { OpenAI } from 'openai';
 let client: OpenAI | null = null;
 
 // Default system prompt
-const DEFAULT_SYSTEM_PROMPT = 'You are a helpful assistant that summarizes YouTube video transcripts clearly and concisely. Focus on the main points, key details, and important takeaways.';
+const DEFAULT_SYSTEM_PROMPT = 'You are a helpful assistant that summarizes YouTube video transcripts clearly and concisely. Focus on the main points, key details, and important takeaways. Format your response using Markdown with headings, bullet points, and emphasis where appropriate.';
 
 // Available models
 const AVAILABLE_MODELS = [
@@ -225,6 +225,9 @@ async function getSummaryOpenAI(transcript: string, tabId: number) {
             ? transcript.substring(0, maxLength) + "..." 
             : transcript;
         
+        // Enhance the user prompt to encourage markdown formatting
+        const userPrompt = `Please summarize the following transcript from a YouTube video. Use markdown formatting to structure your response - include headers for main sections, bullet points for key details, and emphasis for important points.\n\n${truncatedTranscript}`;
+
         // Start stream
         const stream = await client!.chat.completions.create({
             model: model,
@@ -235,7 +238,7 @@ async function getSummaryOpenAI(transcript: string, tabId: number) {
                 },
                 {
                     role: 'user',
-                    content: `Please summarize the following transcript from a YouTube video:\n\n${truncatedTranscript}`
+                    content: userPrompt
                 }
             ],
             stream: true,

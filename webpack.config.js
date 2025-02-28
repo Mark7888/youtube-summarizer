@@ -14,7 +14,11 @@ module.exports = {
         filename: '[name].js'
     },
     resolve: {
-        extensions: ['.tsx', '.ts', '.js']
+        extensions: ['.tsx', '.ts', '.js'],
+        fallback: {
+            "stream": false,
+            "process": false
+        }
     },
     module: {
         rules: [

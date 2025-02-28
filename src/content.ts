@@ -1,5 +1,10 @@
+import { renderMarkdown, sanitizeHtml, createMarkdownStyles } from './markdownRenderer';
+
 // Add a state tracker for generation process
 const generationState = new Map<string, boolean>();
+
+// Track accumulated markdown text for each tab
+const markdownContent = new Map<string, string>();
 
 function addSummarizeButton() {
     // Wait for the buttons container to be available
@@ -278,14 +283,20 @@ function showSummaryOverlay(initialText: string = '') {
         position: fixed;
         bottom: 20px;
         right: 20px;
-        width: 350px;
-        max-height: 400px;
+        width: 25%;
+        max-width: 550px;
+        min-width: 350px;
+        height: 40%;
+        max-height: 600px;
+        min-height: 300px;
         background-color: white;
         box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
         border-radius: 8px;
         z-index: 9999;
         display: flex;
         flex-direction: column;
+        resize: both;
+        overflow: hidden;
     `;
     
     // Create header
@@ -298,6 +309,7 @@ function showSummaryOverlay(initialText: string = '') {
         justify-content: space-between;
         align-items: center;
         border-radius: 8px 8px 0 0;
+        cursor: move;
     `;
     
     // Left side - title and action buttons
@@ -315,53 +327,7 @@ function showSummaryOverlay(initialText: string = '') {
     headerLeft.appendChild(title);
     
     // Copy button
-    const copyBtn = document.createElement('button');
-    copyBtn.className = 'yt-summarizer-copy-btn';
-    copyBtn.innerHTML = `
-        <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 0 24 24" fill="#555">
-            <path d="M16 1H4C2.9 1 2 1.9 2 3v14h2V3h12V1zm3 4H8C6.9 5 6 5.9 6 7v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
-        </svg>
-    `;
-    copyBtn.title = "Copy to clipboard";
-    copyBtn.style.cssText = `
-        background: none;
-        border: none;
-        cursor: pointer;
-        padding: 3px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        opacity: 0.7;
-        transition: opacity 0.2s;
-    `;
-    copyBtn.addEventListener('mouseover', () => {
-        copyBtn.style.opacity = '1';
-    });
-    copyBtn.addEventListener('mouseout', () => {
-        copyBtn.style.opacity = '0.7';
-    });
-    copyBtn.addEventListener('click', () => {
-        const content = document.querySelector('.yt-summarizer-content');
-        if (content && content.textContent) {
-            navigator.clipboard.writeText(content.textContent)
-                .then(() => {
-                    // Visual feedback for copy
-                    const originalInnerHTML = copyBtn.innerHTML;
-                    copyBtn.innerHTML = `
-                        <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 0 24 24" fill="#4CAF50">
-                            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
-                        </svg>
-                    `;
-                    setTimeout(() => {
-                        copyBtn.innerHTML = originalInnerHTML;
-                    }, 1500);
-                })
-                .catch(err => {
-                    console.error('Could not copy text: ', err);
-                });
-        }
-    });
+    const copyBtn = createCopyButton();
     headerLeft.appendChild(copyBtn);
     
     // Regenerate button (refresh icon)
@@ -420,13 +386,23 @@ function showSummaryOverlay(initialText: string = '') {
     
     // Create content area
     const content = document.createElement('div');
-    content.className = 'yt-summarizer-content';
+    content.className = 'yt-summarizer-content markdown-body';
     content.style.cssText = `
         padding: 15px;
         overflow-y: auto;
         flex-grow: 1;
+        overflow-wrap: break-word;
     `;
-    content.textContent = initialText;
+    
+    // Add markdown styles
+    const styleEl = document.createElement('style');
+    styleEl.textContent = createMarkdownStyles();
+    document.head.appendChild(styleEl);
+    
+    // Set initial content
+    if (initialText) {
+        content.textContent = initialText;
+    }
     
     // Assemble overlay
     overlay.appendChild(header);
@@ -454,14 +430,104 @@ function updateSummaryOverlay(text: string, append: boolean = false) {
     const content = document.querySelector('.yt-summarizer-content');
     if (content) {
         if (append) {
+            // For appending, just add to the current content
             content.textContent += text;
         } else {
+            // For replacing, set the text directly
             content.textContent = text;
+            
+            // Reset markdown content for this page
+            markdownContent.set(window.location.href, text);
         }
     } else {
         // If overlay doesn't exist yet, create it
         showSummaryOverlay(text);
     }
+}
+
+// New function to update the overlay with markdown content
+async function updateMarkdownOverlay(markdownText: string) {
+    const content = document.querySelector('.yt-summarizer-content') as HTMLElement;
+    if (!content) return;
+    
+    try {
+        // Render and sanitize markdown - handling async nature
+        const html = await renderMarkdown(markdownText);
+        const safeHtml = sanitizeHtml(html);
+        
+        // Update the content
+        content.innerHTML = safeHtml;
+    } catch (error) {
+        console.error('Error rendering markdown:', error);
+        content.textContent = markdownText;
+    }
+}
+
+// Function to handle copy button click with markdown
+function copyTextToClipboard() {
+    const stateKey = window.location.href;
+    const markdown = markdownContent.get(stateKey) || '';
+    
+    if (markdown) {
+        navigator.clipboard.writeText(markdown)
+            .catch(err => {
+                console.error('Failed to copy markdown:', err);
+            });
+    }
+}
+
+// Update copy button event listener in showSummaryOverlay
+function createCopyButton() {
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'yt-summarizer-copy-btn';
+    copyBtn.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 0 24 24" fill="#555">
+            <path d="M16 1H4C2.9 1 2 1.9 2 3v14h2V3h12V1zm3 4H8C6.9 5 6 5.9 6 7v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+        </svg>
+    `;
+    copyBtn.title = "Copy to clipboard";
+    copyBtn.style.cssText = `
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 3px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0.7;
+        transition: opacity 0.2s;
+    `;
+    copyBtn.addEventListener('mouseover', () => {
+        copyBtn.style.opacity = '1';
+    });
+    copyBtn.addEventListener('mouseout', () => {
+        copyBtn.style.opacity = '0.7';
+    });
+    copyBtn.addEventListener('click', () => {
+        const stateKey = window.location.href;
+        const markdown = markdownContent.get(stateKey) || '';
+        
+        if (markdown) {
+            navigator.clipboard.writeText(markdown)
+                .then(() => {
+                    // Visual feedback for copy
+                    const originalInnerHTML = copyBtn.innerHTML;
+                    copyBtn.innerHTML = `
+                        <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 0 24 24" fill="#4CAF50">
+                            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                        </svg>
+                    `;
+                    setTimeout(() => {
+                        copyBtn.innerHTML = originalInnerHTML;
+                    }, 1500);
+                })
+                .catch(err => {
+                    console.error('Could not copy text: ', err);
+                });
+        }
+    });
+    return copyBtn;
 }
 
 // Run when page loads
@@ -481,17 +547,28 @@ new MutationObserver(() => {
 // Listen for messages from background script
 chrome.runtime.onMessage.addListener((message) => {
     if (message.action === 'updateSummary') {
-        // Append the new content to the summary
+        // Get the current tab's key
+        const stateKey = window.location.href;
+        
+        // Get or initialize the markdown content for this page
+        let currentMarkdown = markdownContent.get(stateKey) || '';
         const content = document.querySelector('.yt-summarizer-content');
+        
         if (content) {
             // Check if this is the first chunk (content contains placeholder text)
             if (content.textContent === 'Generating summary...') {
-                // Clear the placeholder text for the first chunk
-                content.textContent = message.content;
+                // Start fresh with this first chunk
+                currentMarkdown = message.content;
             } else {
                 // Append to existing content for subsequent chunks
-                content.textContent += message.content;
+                currentMarkdown += message.content;
             }
+            
+            // Store the updated markdown
+            markdownContent.set(stateKey, currentMarkdown);
+            
+            // Render the updated markdown (now with async handling)
+            updateMarkdownOverlay(currentMarkdown);
         }
     }
     
