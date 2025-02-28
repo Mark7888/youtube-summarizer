@@ -31,16 +31,12 @@ jobs:
         
       - name: Rename dist directory
         run: mv dist youtube-summarizer-chrome
-        
-      - name: Create ZIP archive
-        run: |
-          zip -r youtube-summarizer-chrome.zip youtube-summarizer-chrome
           
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: youtube-summarizer-chrome
-          path: youtube-summarizer-chrome.zip
+          path: youtube-summarizer-chrome
           retention-days: 7
 
   release:
