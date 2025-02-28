@@ -284,7 +284,7 @@ function showSummaryOverlay(initialText: string = '') {
         bottom: 20px;
         right: 20px;
         width: 25%;
-        max-width: 550px;
+        max-width: 800px;
         min-width: 350px;
         height: auto; /* Dynamic height */
         min-height: 100px; /* Smaller initial height */
@@ -295,8 +295,8 @@ function showSummaryOverlay(initialText: string = '') {
         z-index: 9999;
         display: flex;
         flex-direction: column;
-        resize: both;
         overflow: hidden;
+        transition: none; /* Disable transitions to avoid sluggish dragging */
     `;
     
     // Create header
@@ -364,7 +364,80 @@ function showSummaryOverlay(initialText: string = '') {
     });
     headerLeft.appendChild(regenerateBtn);
     
-    // Right side - close button
+    // Right side - minimize and close buttons
+    const headerRight = document.createElement('div');
+    headerRight.style.cssText = `
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    `;
+    
+    // Minimize/Maximize button
+    const minimizeBtn = document.createElement('button');
+    minimizeBtn.className = 'yt-summarizer-minimize-btn';
+    minimizeBtn.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 0 24 24" fill="#555">
+            <path d="M19 13H5v-2h14v2z"/>
+        </svg>
+    `;
+    minimizeBtn.title = "Minimize";
+    minimizeBtn.style.cssText = `
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 3px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0.7;
+        transition: opacity 0.2s;
+    `;
+    minimizeBtn.addEventListener('mouseover', () => {
+        minimizeBtn.style.opacity = '1';
+    });
+    minimizeBtn.addEventListener('mouseout', () => {
+        minimizeBtn.style.opacity = '0.7';
+    });
+    
+    // Variable to store the original height when minimized
+    let originalHeight: string | null = null;
+    let isMinimized = false;
+    
+    minimizeBtn.addEventListener('click', () => {
+        if (isMinimized) {
+            // Maximize
+            if (originalHeight) {
+                overlay.style.height = originalHeight;
+            }
+            content.style.display = 'block';
+            minimizeBtn.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 0 24 24" fill="#555">
+                    <path d="M19 13H5v-2h14v2z"/>
+                </svg>
+            `;
+            minimizeBtn.title = "Minimize";
+            isMinimized = false;
+        } else {
+            // Minimize
+            originalHeight = overlay.style.height;
+            // Calculate header height and set overlay to that height
+            const headerHeight = header.offsetHeight;
+            overlay.style.height = `${headerHeight}px`;
+            content.style.display = 'none';
+            minimizeBtn.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 0 24 24" fill="#555">
+                    <path d="M19 13H5v-2h14v2z"/>
+                    <path d="M19 13H5v6h14v-6z"/>
+                </svg>
+            `;
+            minimizeBtn.title = "Maximize";
+            isMinimized = true;
+        }
+    });
+    
+    headerRight.appendChild(minimizeBtn);
+    
+    // Close button
     const closeBtn = document.createElement('button');
     closeBtn.innerHTML = '&times;';
     closeBtn.style.cssText = `
@@ -379,10 +452,11 @@ function showSummaryOverlay(initialText: string = '') {
         // Clear generation state when closing
         generationState.delete(window.location.href);
     };
+    headerRight.appendChild(closeBtn);
     
     // Assemble header
     header.appendChild(headerLeft);
-    header.appendChild(closeBtn);
+    header.appendChild(headerRight); // Use headerRight instead of directly appending closeBtn
     
     // Create content area
     const content = document.createElement('div');
@@ -412,8 +486,68 @@ function showSummaryOverlay(initialText: string = '') {
     overlay.appendChild(content);
     document.body.appendChild(overlay);
     
+    // Add resize handles
+    addResizeHandles(overlay);
+    
+    // Make the overlay draggable
+    makeDraggable(overlay, header);
+    
     // Update regenerate button visibility based on current state
     updateRegenerateButtonVisibility();
+}
+
+// Function to make an element draggable
+function makeDraggable(element: HTMLElement, dragHandle: HTMLElement) {
+    let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+    
+    // Get the position of the mouse cursor, initialize drag sequence
+    dragHandle.onmousedown = dragMouseDown;
+    
+    function dragMouseDown(e: MouseEvent) {
+        e.preventDefault();
+        // Get the mouse cursor position at startup
+        pos3 = e.clientX;
+        pos4 = e.clientY;
+        
+        // Add event listeners for drag events
+        document.onmouseup = closeDragElement;
+        document.onmousemove = elementDrag;
+    }
+    
+    function elementDrag(e: MouseEvent) {
+        e.preventDefault();
+        // Calculate the new cursor position
+        pos1 = pos3 - e.clientX;
+        pos2 = pos4 - e.clientY;
+        pos3 = e.clientX;
+        pos4 = e.clientY;
+        
+        // Ensure the element stays within viewport bounds
+        const newTop = element.offsetTop - pos2;
+        const newLeft = element.offsetLeft - pos1;
+        const maxLeft = window.innerWidth - element.offsetWidth;
+        const maxTop = window.innerHeight - element.offsetHeight;
+        
+        // Set the element's new position with bounds checking
+        element.style.top = Math.min(Math.max(0, newTop), maxTop) + "px";
+        element.style.left = Math.min(Math.max(0, newLeft), maxLeft) + "px";
+        
+        // After moving, fix the position to be absolute rather than fixed
+        if (element.style.position === 'fixed') {
+            const rect = element.getBoundingClientRect();
+            element.style.position = 'absolute';
+            element.style.top = rect.top + window.scrollY + "px";
+            element.style.left = rect.left + window.scrollX + "px";
+            element.style.bottom = 'auto';
+            element.style.right = 'auto';
+        }
+    }
+    
+    function closeDragElement() {
+        // Stop moving when mouse button is released
+        document.onmouseup = null;
+        document.onmousemove = null;
+    }
 }
 
 // New function to adjust the overlay's height based on content
@@ -423,6 +557,11 @@ function adjustOverlayHeight() {
     const header = overlay?.querySelector('div') as HTMLElement; // First div is the header
     
     if (!overlay || !content || !header) return;
+    
+    // If the content is not displayed (minimized), don't adjust the height
+    if (content.style.display === 'none') {
+        return;
+    }
     
     // Get the actual content height
     const contentHeight = content.scrollHeight;
@@ -569,6 +708,164 @@ function createCopyButton() {
     return copyBtn;
 }
 
+// Function to add resize handles to the overlay
+function addResizeHandles(element: HTMLElement) {
+    // Define positions for the resize handles
+    const positions = [
+        'top', 'right', 'bottom', 'left',
+        'top-left', 'top-right', 'bottom-left', 'bottom-right'
+    ];
+    
+    // Minimum dimensions
+    const minWidth = 350;
+    const minHeight = 100;
+    
+    // Maximum dimensions
+    const maxWidth = 800;
+    const maxHeight = 600;
+    
+    // Create and append resize handles
+    positions.forEach(pos => {
+        const handle = document.createElement('div');
+        handle.className = `yt-summarizer-resize-handle ${pos}`;
+        
+        // Set appropriate cursor and position for each handle
+        let cursor = pos.includes('-') ? 
+            `${pos.replace('-', '')}-resize` : 
+            `${pos}-resize`;
+            
+        // Special case for left/right and top/bottom
+        if (pos === 'left' || pos === 'right') cursor = 'ew-resize';
+        if (pos === 'top' || pos === 'bottom') cursor = 'ns-resize';
+        
+        // Style the handle
+        handle.style.cssText = `
+            position: absolute;
+            z-index: 10000;
+            background-color: transparent;
+            ${getHandlePositionStyle(pos)}
+            cursor: ${cursor};
+        `;
+        
+        // Add mousedown event listener to initiate resizing
+        handle.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            // Initial coordinates
+            const startX = e.clientX;
+            const startY = e.clientY;
+            
+            // Initial element dimensions and position
+            const startWidth = element.offsetWidth;
+            const startHeight = element.offsetHeight;
+            const startLeft = element.offsetLeft;
+            const startTop = element.offsetTop;
+            
+            // Convert to absolute positioning if using fixed
+            if (element.style.position === 'fixed') {
+                const rect = element.getBoundingClientRect();
+                element.style.position = 'absolute';
+                element.style.top = rect.top + window.scrollY + "px";
+                element.style.left = rect.left + window.scrollX + "px";
+                element.style.bottom = 'auto';
+                element.style.right = 'auto';
+            }
+            
+            // Function to handle the resizing
+            function onMouseMove(e: MouseEvent) {
+                // Calculate the distance moved
+                const dx = e.clientX - startX;
+                const dy = e.clientY - startY;
+                
+                // Update dimensions based on the direction
+                let newWidth = startWidth;
+                let newHeight = startHeight;
+                let newLeft = startLeft;
+                let newTop = startTop;
+                
+                // Handle resizing based on position
+                if (pos.includes('right')) {
+                    newWidth = startWidth + dx;
+                    newWidth = Math.min(Math.max(newWidth, minWidth), maxWidth);
+                }
+                
+                if (pos.includes('bottom')) {
+                    newHeight = startHeight + dy;
+                    newHeight = Math.min(Math.max(newHeight, minHeight), maxHeight);
+                }
+                
+                if (pos.includes('left')) {
+                    const deltaWidth = Math.min(Math.max(startWidth - dx, minWidth), maxWidth);
+                    newLeft = startLeft + (startWidth - deltaWidth);
+                    newWidth = deltaWidth;
+                }
+                
+                if (pos.includes('top')) {
+                    const deltaHeight = Math.min(Math.max(startHeight - dy, minHeight), maxHeight);
+                    newTop = startTop + (startHeight - deltaHeight);
+                    newHeight = deltaHeight;
+                }
+                
+                // Apply new dimensions and position
+                element.style.width = `${newWidth}px`;
+                element.style.height = `${newHeight}px`;
+                element.style.left = `${newLeft}px`;
+                element.style.top = `${newTop}px`;
+                
+                // Ensure content scrolling works properly
+                const content = element.querySelector('.yt-summarizer-content') as HTMLElement;
+                if (content) {
+                    const header = element.querySelector('div') as HTMLElement; // First div is the header
+                    if (header) {
+                        const contentHeight = newHeight - header.offsetHeight;
+                        content.style.height = `${contentHeight}px`;
+                    }
+                }
+            }
+            
+            // Function to stop resizing
+            function onMouseUp() {
+                document.removeEventListener('mousemove', onMouseMove);
+                document.removeEventListener('mouseup', onMouseUp);
+            }
+            
+            // Add events to document to handle dragging outside the element
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+        });
+        
+        element.appendChild(handle);
+    });
+}
+
+// Helper function to get CSS positioning for each handle
+function getHandlePositionStyle(pos: string): string {
+    const handleSize = '10px';  // Size of the handle area
+    const edgeSize = '8px';     // Size of the corner handles
+    
+    switch (pos) {
+        case 'top':
+            return `top: 0; left: ${handleSize}; right: ${handleSize}; height: ${handleSize}; cursor: ns-resize;`;
+        case 'right':
+            return `top: ${handleSize}; right: 0; bottom: ${handleSize}; width: ${handleSize}; cursor: ew-resize;`;
+        case 'bottom':
+            return `bottom: 0; left: ${handleSize}; right: ${handleSize}; height: ${handleSize}; cursor: ns-resize;`;
+        case 'left':
+            return `top: ${handleSize}; left: 0; bottom: ${handleSize}; width: ${handleSize}; cursor: ew-resize;`;
+        case 'top-left':
+            return `top: 0; left: 0; width: ${edgeSize}; height: ${edgeSize}; cursor: nwse-resize;`;
+        case 'top-right':
+            return `top: 0; right: 0; width: ${edgeSize}; height: ${edgeSize}; cursor: nesw-resize;`;
+        case 'bottom-left':
+            return `bottom: 0; left: 0; width: ${edgeSize}; height: ${edgeSize}; cursor: nesw-resize;`;
+        case 'bottom-right':
+            return `bottom: 0; right: 0; width: ${edgeSize}; height: ${edgeSize}; cursor: nwse-resize;`;
+        default:
+            return '';
+    }
+}
+
 // Run when page loads
 window.addEventListener('yt-navigate-finish', addSummarizeButton);
 
@@ -622,7 +919,13 @@ chrome.runtime.onMessage.addListener((message) => {
         updateRegenerateButtonVisibility();
         
         // Final height adjustment after a small delay to ensure content is fully rendered
-        setTimeout(() => adjustOverlayHeight(), 100);
+        setTimeout(() => {
+            // Only adjust height if the content is visible (not minimized)
+            const content = document.querySelector('.yt-summarizer-content') as HTMLElement | null;
+            if (content && content.style.display !== 'none') {
+                adjustOverlayHeight();
+            }
+        }, 100);
     }
     
     if (message.action === 'summaryError') {

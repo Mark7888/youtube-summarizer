@@ -9,6 +9,8 @@ A Chrome extension that automatically summarizes YouTube videos by analyzing the
 - **Markdown Support**: Displays summaries with proper formatting (headings, bullet points, etc.)
 - **Customizable**: Choose different AI models and customize the system prompt
 - **Resizable Summary Window**: Adjust the summary overlay to your preferred size
+- **Draggable Summary Window**: Move the summary overlay anywhere on the screen
+- **Minimizable Window**: Minimize the summary overlay to keep it out of the way when not needed
 - **Copy Functionality**: Easily copy summaries to your clipboard
 - **Regenerate Option**: Get a new summary with a single click if needed
 
