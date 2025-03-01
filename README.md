@@ -6,6 +6,7 @@ A Chrome extension that automatically summarizes YouTube videos by analyzing the
 
 - **One-Click Summaries**: Adds a "Summarize" button directly to the YouTube video player interface
 - **AI-Powered**: Uses OpenAI's powerful models (like GPT-4o-mini by default) to generate concise summaries
+- **View Original Transcript**: Access the complete transcript without leaving YouTube
 - **Markdown Support**: Displays summaries with proper formatting (headings, bullet points, etc.)
 - **Customizable**: Choose different AI models and customize the system prompt
 - **Resizable Summary Window**: Adjust the summary overlay to your preferred size
@@ -106,6 +107,10 @@ Alternatively, the extension will prompt you to enter your API key when you firs
 2. Click the "Summarize" button that appears next to the Like/Dislike buttons
 3. Wait a moment while the extension processes the transcript
 4. Read the summary in the popup window that appears
+5. Use the tabs at the top to switch between:
+   - **Summary**: AI-generated summary of the video
+   - **Transcript**: Complete transcript of the video
+   - **Conversation**: Chat about the video content (coming soon)
 
 ### Customization Options
 

@@ -1,10 +1,17 @@
 import { renderMarkdown, sanitizeHtml, createMarkdownStyles } from './markdownRenderer';
+import { TabType } from './types';
+import summaryTab from './tabs/summaryTab';
+import transcriptTab from './tabs/transcriptTab';
+import conversationTab from './tabs/conversationTab';
 
 // Add a state tracker for generation process
 const generationState = new Map<string, boolean>();
 
 // Track accumulated markdown text for each tab
 const markdownContent = new Map<string, string>();
+
+// Track active tab
+let activeTab: TabType = 'summary';
 
 function addSummarizeButton() {
     // Wait for the buttons container to be available
@@ -157,6 +164,12 @@ function startSummarization(videoUrl: string) {
                 
                 if (response.action === 'prepareSummary') {
                     updateSummaryOverlay('Generating summary...');
+                    
+                    // If we have a transcript, pass it to the transcript tab
+                    if (response.transcript) {
+                        transcriptTab.handleTranscriptLoaded(response.transcript);
+                    }
+                    
                     // Request the actual summary - simplified to avoid waiting for a response
                     try {
                         chrome.runtime.sendMessage(
@@ -445,7 +458,8 @@ function showSummaryOverlay(initialText: string = '') {
             if (originalHeight) {
                 overlay.style.height = originalHeight;
             }
-            content.style.display = 'block';
+            tabsRow.style.display = 'flex';
+            contentContainer.style.display = 'block';
             minimizeBtn.innerHTML = `
                 <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 0 24 24" fill="#555">
                     <path d="M19 13H5v-2h14v2z"/>
@@ -459,7 +473,8 @@ function showSummaryOverlay(initialText: string = '') {
             // Calculate header height and set overlay to that height
             const headerHeight = header.offsetHeight;
             overlay.style.height = `${headerHeight}px`;
-            content.style.display = 'none';
+            tabsRow.style.display = 'none';
+            contentContainer.style.display = 'none';
             minimizeBtn.innerHTML = `
                 <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 0 24 24" fill="#555">
                     <path d="M19 13H5v-2h14v2z"/>
@@ -492,34 +507,123 @@ function showSummaryOverlay(initialText: string = '') {
     
     // Assemble header
     header.appendChild(headerLeft);
-    header.appendChild(headerRight); // Use headerRight instead of directly appending closeBtn
+    header.appendChild(headerRight);
     
-    // Create content area
-    const content = document.createElement('div');
-    content.className = 'yt-summarizer-content markdown-body';
-    content.style.cssText = `
-        padding: 15px;
-        overflow-y: auto;
-        flex-grow: 1;
-        overflow-wrap: break-word;
-        max-height: 500px; /* Keep scrollable area if content is long */
+    // Create tabs row
+    const tabsRow = document.createElement('div');
+    tabsRow.className = 'yt-summarizer-tabs';
+    tabsRow.style.cssText = `
+        display: flex;
+        border-bottom: 1px solid #ddd;
     `;
+    
+    // Create tabs
+    const tabs: {type: TabType, label: string}[] = [
+        { type: 'summary', label: 'Summary' },
+        { type: 'transcript', label: 'Transcript' },
+        { type: 'conversation', label: 'Conversation' }
+    ];
+    
+    tabs.forEach(tab => {
+        const tabEl = document.createElement('div');
+        tabEl.className = `yt-summarizer-tab ${tab.type === activeTab ? 'active' : ''}`;
+        tabEl.dataset.tabType = tab.type;
+        tabEl.textContent = tab.label;
+        tabEl.style.cssText = `
+            flex: 1;
+            padding: 10px;
+            text-align: center;
+            cursor: pointer;
+            background-color: ${tab.type === activeTab ? '#eaeaea' : '#f9f9f9'};
+            border-bottom: 2px solid ${tab.type === activeTab ? '#4285f4' : 'transparent'};
+            transition: background-color 0.2s;
+        `;
+        
+        tabEl.addEventListener('click', () => {
+            switchTab(tab.type);
+        });
+        
+        tabsRow.appendChild(tabEl);
+    });
+    
+    // Create content container
+    const contentContainer = document.createElement('div');
+    contentContainer.className = 'yt-summarizer-content-container';
+    contentContainer.style.cssText = `
+        flex-grow: 1;
+        overflow: hidden;
+        position: relative;
+    `;
+    
+    // Create individual content areas for each tab
+    const tabContents: {[key in TabType]: HTMLElement} = {
+        summary: document.createElement('div'),
+        transcript: document.createElement('div'),
+        conversation: document.createElement('div')
+    };
+    
+    // Set up each content area
+    Object.entries(tabContents).forEach(([type, element]) => {
+        element.className = `yt-summarizer-content yt-summarizer-${type} markdown-body`;
+        element.style.cssText = `
+            padding: 15px;
+            overflow-y: auto;
+            height: 100%;
+            display: ${type === activeTab ? 'block' : 'none'};
+            overflow-wrap: break-word;
+        `;
+        contentContainer.appendChild(element);
+    });
+    
+    // Initialize tab handlers
+    summaryTab.initialize(tabContents.summary);
+    transcriptTab.initialize(tabContents.transcript);
+    conversationTab.initialize(tabContents.conversation);
+    
+    // Set initial content
+    if (initialText) {
+        summaryTab.handleContent(initialText);
+    }
+    
+    // Activate the current tab
+    activateTab(activeTab);
     
     // Add markdown styles
     const styleEl = document.createElement('style');
     styleEl.textContent = createMarkdownStyles();
     document.head.appendChild(styleEl);
     
-    // Set initial content
-    if (initialText) {
-        content.textContent = initialText;
-        // Schedule a height adjustment after content is set
-        setTimeout(() => adjustOverlayHeight(), 10);
-    }
+    // Add tab styles
+    const tabStyles = document.createElement('style');
+    tabStyles.textContent = `
+        .yt-summarizer-tabs {
+            display: flex;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .yt-summarizer-tab {
+            flex: 1;
+            padding: 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .yt-summarizer-tab:hover {
+            background-color: #f0f0f0;
+        }
+        
+        .yt-summarizer-tab.active {
+            background-color: #eaeaea;
+            border-bottom: 2px solid #4285f4;
+        }
+    `;
+    document.head.appendChild(tabStyles);
     
     // Assemble overlay
     overlay.appendChild(header);
-    overlay.appendChild(content);
+    overlay.appendChild(tabsRow);
+    overlay.appendChild(contentContainer);
     document.body.appendChild(overlay);
     
     // Add resize handles
@@ -530,6 +634,48 @@ function showSummaryOverlay(initialText: string = '') {
     
     // Update regenerate button visibility based on current state
     updateRegenerateButtonVisibility();
+}
+
+// Switch between tabs
+function switchTab(tabType: TabType) {
+    // Skip if already on this tab
+    if (activeTab === tabType) return;
+    
+    // Update active tab state
+    const prevTab = activeTab;
+    activeTab = tabType;
+    
+    // Update tab styling
+    const tabs = document.querySelectorAll('.yt-summarizer-tab');
+    tabs.forEach(tab => {
+        if ((tab as HTMLElement).dataset.tabType === tabType) {
+            tab.classList.add('active');
+            (tab as HTMLElement).style.backgroundColor = '#eaeaea';
+            (tab as HTMLElement).style.borderBottom = '2px solid #4285f4';
+        } else {
+            tab.classList.remove('active');
+            (tab as HTMLElement).style.backgroundColor = '#f9f9f9';
+            (tab as HTMLElement).style.borderBottom = '2px solid transparent';
+        }
+    });
+    
+    // Deactivate previous tab handler
+    if (prevTab === 'summary') summaryTab.deactivate();
+    if (prevTab === 'transcript') transcriptTab.deactivate();
+    if (prevTab === 'conversation') conversationTab.deactivate();
+    
+    // Activate new tab handler
+    activateTab(tabType);
+    
+    // Adjust container height based on content
+    setTimeout(() => adjustOverlayHeight(), 10);
+}
+
+// Activate a specific tab
+function activateTab(tabType: TabType) {
+    if (tabType === 'summary') summaryTab.activate();
+    if (tabType === 'transcript') transcriptTab.activate();
+    if (tabType === 'conversation') conversationTab.activate();
 }
 
 // Function to make an element draggable with pin button support
@@ -658,36 +804,55 @@ function makeDraggable(element: HTMLElement, dragHandle: HTMLElement, pinButton?
 // New function to adjust the overlay's height based on content
 function adjustOverlayHeight() {
     const overlay = document.querySelector('.yt-summarizer-overlay') as HTMLElement;
-    const content = document.querySelector('.yt-summarizer-content') as HTMLElement;
-    const header = overlay?.querySelector('div') as HTMLElement; // First div is the header
+    const activeContent = document.querySelector(`.yt-summarizer-${activeTab}`) as HTMLElement;
+    const header = overlay?.querySelector('div:first-child') as HTMLElement;
+    const tabsRow = document.querySelector('.yt-summarizer-tabs') as HTMLElement;
     
-    if (!overlay || !content || !header) return;
+    if (!overlay || !activeContent || !header || !tabsRow) return;
     
     // If the content is not displayed (minimized), don't adjust the height
-    if (content.style.display === 'none') {
+    if (activeContent.style.display === 'none') {
         return;
     }
     
     // Get the actual content height
-    const contentHeight = content.scrollHeight;
+    const contentHeight = activeContent.scrollHeight;
     
     // Get header height
     const headerHeight = header.offsetHeight;
     
+    // Get tabs row height
+    const tabsRowHeight = tabsRow.offsetHeight;
+    
     // Calculate the total desired height with some padding
     const padding = 30;
-    const desiredHeight = contentHeight + headerHeight + padding;
+    const desiredHeight = contentHeight + headerHeight + tabsRowHeight + padding;
     
     // Set limits
-    const minHeight = 100;
+    const minHeight = 150; // Increased minimum height
     const maxHeight = 600;
     
     // Apply the calculated height within constraints
     const newHeight = Math.min(Math.max(desiredHeight, minHeight), maxHeight);
     overlay.style.height = `${newHeight}px`;
     
+    // Set container height to fill available space
+    const contentContainer = document.querySelector('.yt-summarizer-content-container') as HTMLElement;
+    if (contentContainer) {
+        const availableHeight = newHeight - headerHeight - tabsRowHeight;
+        contentContainer.style.height = `${availableHeight}px`;
+    }
+    
     // Only show scrollbar if needed
-    content.style.overflowY = contentHeight > (newHeight - headerHeight - padding) ? 'auto' : 'hidden';
+    activeContent.style.overflowY = contentHeight > (newHeight - headerHeight - tabsRowHeight - padding) ? 'auto' : 'hidden';
+    
+    // Ensure bottom padding is visible
+    if (activeTab === 'summary') {
+        const summaryContent = document.querySelector('.yt-summarizer-summary') as HTMLElement;
+        if (summaryContent) {
+            summaryContent.style.paddingBottom = '20px';
+        }
+    }
 }
 
 // Function to update regenerate button visibility
