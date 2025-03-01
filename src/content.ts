@@ -553,6 +553,8 @@ function showSummaryOverlay(initialText: string = '') {
         flex-grow: 1;
         overflow: hidden;
         position: relative;
+        display: flex;
+        flex-direction: column;
     `;
     
     // Create individual content areas for each tab
@@ -567,11 +569,26 @@ function showSummaryOverlay(initialText: string = '') {
         element.className = `yt-summarizer-content yt-summarizer-${type} markdown-body`;
         element.style.cssText = `
             padding: 15px;
-            overflow-y: auto;
             height: 100%;
             display: ${type === activeTab ? 'block' : 'none'};
             overflow-wrap: break-word;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch; /* Smoother scrolling on iOS */
+            scrollbar-width: thin; /* For Firefox */
+            box-sizing: border-box;
         `;
+        
+        // Add specific scroll handling to prevent stuck scrolling
+        element.addEventListener('wheel', (e) => {
+            const { scrollTop, scrollHeight, clientHeight } = element;
+            
+            // Allow scroll event to propagate naturally unless we're at the boundaries
+            if ((scrollTop <= 0 && e.deltaY < 0) || 
+                (scrollTop + clientHeight >= scrollHeight && e.deltaY > 0)) {
+                e.preventDefault();
+            }
+        }, { passive: false });
+        
         contentContainer.appendChild(element);
     });
     
@@ -843,16 +860,14 @@ function adjustOverlayHeight() {
         contentContainer.style.height = `${availableHeight}px`;
     }
     
-    // Only show scrollbar if needed
-    activeContent.style.overflowY = contentHeight > (newHeight - headerHeight - tabsRowHeight - padding) ? 'auto' : 'hidden';
-    
-    // Ensure bottom padding is visible
-    if (activeTab === 'summary') {
-        const summaryContent = document.querySelector('.yt-summarizer-summary') as HTMLElement;
-        if (summaryContent) {
-            summaryContent.style.paddingBottom = '20px';
-        }
-    }
+    // Ensure content areas have proper scrolling settings
+    const contentAreas = document.querySelectorAll('.yt-summarizer-content');
+    contentAreas.forEach(element => {
+        // Only show scrollbar if needed
+        const el = element as HTMLElement;
+        const shouldScroll = el.scrollHeight > (newHeight - headerHeight - tabsRowHeight);
+        el.style.overflowY = shouldScroll ? 'auto' : 'hidden';
+    });
 }
 
 // Function to update regenerate button visibility
@@ -902,6 +917,12 @@ async function updateMarkdownOverlay(markdownText: string) {
         
         // Update the content
         content.innerHTML = safeHtml;
+        
+        // Add bottom padding to ensure scrolling works properly
+        const paddingElement = document.createElement('div');
+        paddingElement.style.height = '20px';
+        paddingElement.style.width = '100%';
+        content.appendChild(paddingElement);
         
         // Adjust container height based on content
         setTimeout(() => adjustOverlayHeight(), 10);
