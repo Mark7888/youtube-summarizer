@@ -36,6 +36,12 @@ export class TranscriptTab implements TabHandler {
     }
   }
 
+  handleContent(content: string): void {
+    // This method is required by the TabHandler interface
+    // For transcript tab, we'll use this as an alternative way to set transcript content
+    this.handleTranscriptLoaded(content);
+  }
+
   handleTranscriptLoaded(transcript: string): void {
     this.transcript = transcript;
     
@@ -131,6 +137,11 @@ export class TranscriptTab implements TabHandler {
   }
 
   getContent(): string {
+    return this.transcript;
+  }
+
+  copyContent(): string {
+    // Return the transcript in a clean format
     return this.transcript;
   }
 }

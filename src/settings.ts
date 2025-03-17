@@ -1,22 +1,15 @@
-// Define the default system prompt
-const DEFAULT_SYSTEM_PROMPT = 'You are a helpful assistant that summarizes YouTube video transcripts clearly and concisely. Focus on the main points, key details, and important takeaways.';
-
-// Define available models (sync with background.ts)
-const AVAILABLE_MODELS = [
-    'gpt-4o-mini',
-    'gpt-4o',
-    'gpt-4',
-    'gpt-4-turbo',
-    'gpt-3.5-turbo',
-    // Add more models as needed
-];
-
-// Default model
-const DEFAULT_MODEL = 'gpt-4o-mini';
+// Import constants from openAIService.ts to avoid duplication
+import { 
+    DEFAULT_SUMMARY_SYSTEM_PROMPT, 
+    DEFAULT_CHAT_SYSTEM_PROMPT,
+    AVAILABLE_MODELS, 
+    DEFAULT_MODEL 
+} from './services/openAIService';
 
 document.addEventListener('DOMContentLoaded', () => {
     const apiKeyInput = document.getElementById('apiKey') as HTMLInputElement;
     const systemPromptInput = document.getElementById('systemPrompt') as HTMLTextAreaElement;
+    const chatSystemPromptInput = document.getElementById('chatSystemPrompt') as HTMLTextAreaElement;
     const modelSelect = document.getElementById('modelSelect') as HTMLSelectElement;
     const customModelInput = document.getElementById('customModel') as HTMLInputElement;
     const customModelContainer = document.getElementById('customModelContainer') as HTMLDivElement;
@@ -32,12 +25,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Load saved settings
-    chrome.storage.sync.get(['openaiApiKey', 'systemPrompt', 'model'], (result) => {
+    chrome.storage.sync.get(['openaiApiKey', 'systemPrompt', 'chatSystemPrompt', 'model'], (result) => {
         if (result.openaiApiKey) {
             apiKeyInput.value = result.openaiApiKey;
         }
         
-        systemPromptInput.value = result.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+        systemPromptInput.value = result.systemPrompt || DEFAULT_SUMMARY_SYSTEM_PROMPT;
+        chatSystemPromptInput.value = result.chatSystemPrompt || DEFAULT_CHAT_SYSTEM_PROMPT;
         
         // Handle model selection
         if (result.model) {
@@ -105,6 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function saveSettings() {
         const apiKey = apiKeyInput.value.trim();
         let systemPrompt = systemPromptInput.value.trim();
+        let chatSystemPrompt = chatSystemPromptInput.value.trim();
         
         // Get selected model
         let model = modelSelect.value;
@@ -125,16 +120,22 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         
-        // If system prompt is empty, use the default
+        // If system prompts are empty, use the defaults
         if (!systemPrompt) {
-            systemPrompt = DEFAULT_SYSTEM_PROMPT;
-            systemPromptInput.value = DEFAULT_SYSTEM_PROMPT;
+            systemPrompt = DEFAULT_SUMMARY_SYSTEM_PROMPT;
+            systemPromptInput.value = DEFAULT_SUMMARY_SYSTEM_PROMPT;
+        }
+        
+        if (!chatSystemPrompt) {
+            chatSystemPrompt = DEFAULT_CHAT_SYSTEM_PROMPT;
+            chatSystemPromptInput.value = DEFAULT_CHAT_SYSTEM_PROMPT;
         }
 
         // Save to storage
         chrome.storage.sync.set({ 
             openaiApiKey: apiKey,
             systemPrompt: systemPrompt,
+            chatSystemPrompt: chatSystemPrompt,
             model: model
         }, () => {
             showMessage('Settings saved successfully', 'success');

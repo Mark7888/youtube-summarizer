@@ -136,9 +136,17 @@
     <div class="divider"></div>
     
     <div class="form-group">
-        <label for="systemPrompt">System Prompt:</label>
-        <textarea id="systemPrompt" placeholder="Enter the instruction for the AI model"></textarea>
+        <label for="systemPrompt">Summary System Prompt:</label>
+        <textarea id="systemPrompt" placeholder="Enter the instruction for the AI model when summarizing"></textarea>
         <div class="note">This prompt guides how the AI summarizes video transcripts</div>
+    </div>
+    
+    <div class="divider"></div>
+    
+    <div class="form-group">
+        <label for="chatSystemPrompt">Chat System Prompt:</label>
+        <textarea id="chatSystemPrompt" placeholder="Enter the instruction for the AI model when chatting"></textarea>
+        <div class="note">This prompt guides how the AI responds in chat conversations about videos</div>
     </div>
     
     <button id="saveBtn">Save Settings</button>

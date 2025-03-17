@@ -4,7 +4,9 @@ import { extractVideoId, fetchTranscript } from './services/youtubeTranscriptSer
 import { 
   checkApiKeyAndInitClient, 
   generateSummary, 
-  resetClient 
+  resetClient,
+  chatWithAI,
+  ChatMessage
 } from './services/openAIService';
 
 // Listen for messages from content script
@@ -64,6 +66,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     
     // Send immediate acknowledgment and close the message channel
     sendResponse({ success: true, message: 'Summary generation started' });
+    return true;
+  }
+  
+  if (message.action === 'chatWithAI' && sender.tab?.id) {
+    const tabId = sender.tab.id;
+    
+    // Process chat request from conversation tab
+    handleChatWithAI(message.transcript, message.messages, tabId);
+    
+    // Send immediate acknowledgment
+    sendResponse({ success: true, message: 'Chat processing started' });
     return true;
   }
   
@@ -162,6 +175,59 @@ async function getSummaryOpenAI(transcript: string, tabId: number): Promise<void
       });
     }
   );
+}
+
+// Process chat requests with OpenAI
+async function handleChatWithAI(transcript: string, messages: ChatMessage[], tabId: number): Promise<void> {
+  try {
+    // First check if API key is valid and initialized
+    const initResult = await checkApiKeyAndInitClient();
+    if (!initResult.success) {
+      sendTabMessage(tabId, {
+        action: 'chatResponse',
+        success: false,
+        error: initResult.error || 'Failed to initialize OpenAI client',
+        needsApiKey: initResult.needsApiKey || false
+      });
+      return;
+    }
+    
+    // Process chat through the OpenAI service
+    await chatWithAI(
+      transcript,
+      messages,
+      // OnChunk handler
+      (content) => {
+        sendTabMessage(tabId, {
+          action: 'chatChunk',
+          content: content
+        }).catch(err => {
+          // Continue processing - don't break the loop
+        });
+      },
+      // OnComplete handler
+      () => {
+        sendTabMessage(tabId, { action: 'chatComplete' })
+          .catch(err => {
+            // Error handling
+          });
+      },
+      // OnError handler
+      (error, needsApiKey) => {
+        sendTabMessage(tabId, {
+          action: 'chatError',
+          error: error,
+          needsApiKey: needsApiKey
+        });
+      }
+    );
+  } catch (error: any) {
+    sendTabMessage(tabId, {
+      action: 'chatError',
+      error: error instanceof Error ? error.message : 'Unknown error',
+      needsApiKey: false
+    });
+  }
 }
 
 // Add storage change listener to reset client when API key changes

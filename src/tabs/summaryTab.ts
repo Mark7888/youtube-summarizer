@@ -1,8 +1,10 @@
 import { TabHandler } from '../types';
 import { renderMarkdown, sanitizeHtml } from '../markdownRenderer';
+import { markdownContent } from '../components/SummaryController';
 
 export class SummaryTab implements TabHandler {
   private contentElement: HTMLElement | null = null;
+  private content: string = '';
   private markdownContent = '';
 
   initialize(contentElement: HTMLElement): void {
@@ -60,6 +62,20 @@ export class SummaryTab implements TabHandler {
       // Fallback to plain text if rendering fails
       this.contentElement.textContent = markdownText;
     }
+  }
+
+  copyContent(): string | null {
+    // Get the current URL to use as the key
+    const stateKey = window.location.href;
+    
+    // First try to get content from the markdownContent map
+    const markdownText = markdownContent.get(stateKey);
+    if (markdownText) {
+      return markdownText;
+    }
+    
+    // If not available in the map, use the locally stored content
+    return this.content || null;
   }
 
   // Helper method to ensure content is fully visible

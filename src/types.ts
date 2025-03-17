@@ -1,15 +1,13 @@
-// Shared types for the extension
+// Type definitions for YouTube Summarizer
 
-// Tab type definition
+// Tab types for the overlay
 export type TabType = 'summary' | 'transcript' | 'conversation';
 
-// Interface for tab handlers
+// Tab interface for tab handlers
 export interface TabHandler {
-  initialize: (contentElement: HTMLElement) => void;
+  initialize: (container: HTMLElement) => void;
   activate: () => void;
   deactivate: () => void;
-  handleContent?: (content: string, append?: boolean) => void;
-  handleMarkdown?: (markdown: string) => void;
-  getContent?: () => string | null;
-  handleTranscriptLoaded?: (transcript: string) => void;
+  handleContent: (content: string) => void;
+  copyContent: () => string | null; // New method to get copyable content
 }

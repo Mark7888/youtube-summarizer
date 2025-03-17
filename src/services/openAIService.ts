@@ -1,7 +1,10 @@
 import { OpenAI } from 'openai';
 
 // Default system prompt
-export const DEFAULT_SYSTEM_PROMPT = 'You are a helpful assistant that summarizes YouTube video transcripts clearly and concisely. Focus on the main points, key details, and important takeaways. Format your response using Markdown with headings, bullet points, and emphasis where appropriate.';
+export const DEFAULT_SUMMARY_SYSTEM_PROMPT = 'You are a helpful assistant that summarizes YouTube video transcripts clearly and concisely. Focus on the main points, key details, and important takeaways. Format your response using Markdown with headings, bullet points, and emphasis where appropriate.';
+
+// Default chat system prompt
+export const DEFAULT_CHAT_SYSTEM_PROMPT = 'You are a helpful assistant discussing a YouTube video. Refer to the transcript context provided to answer questions and engage in conversation about the video content. Be informative, concise, and accurate.';
 
 // Available models
 export const AVAILABLE_MODELS = [
@@ -16,7 +19,13 @@ export const AVAILABLE_MODELS = [
 // Default model to use
 export const DEFAULT_MODEL = 'gpt-4o-mini';
 
-let client: OpenAI | null = null;
+// Interface for chat messages
+export interface ChatMessage {
+    role: 'system' | 'user' | 'assistant';
+    content: string;
+}
+
+var client: OpenAI | null = null;
 
 /**
  * Initialize the OpenAI client with API key from storage
@@ -80,15 +89,21 @@ export async function validateApiKey(): Promise<{ valid: boolean; error?: string
 export async function checkApiKeyAndInitClient() {
     const initResult = await initializeOpenAIClient();
 
-    if (initResult.success) {
-        // Validate the API key if initialization was successful
-        const validationResult = await validateApiKey();
-        if (!validationResult.valid) {
-            return { success: false, error: validationResult.error, needsApiKey: true };
+    if (!initResult.success) {
+        // Check if the error is due to missing API key
+        if (initResult.error === 'No API key found') {
+            return { success: false, error: 'Please add your OpenAI API key in extension settings.', needsApiKey: true };
         }
+        return { success: false, error: initResult.error || 'Failed to initialize OpenAI client', needsApiKey: true };
     }
 
-    return initResult;
+    // Validate the API key if initialization was successful
+    const validationResult = await validateApiKey();
+    if (!validationResult.valid) {
+        return { success: false, error: validationResult.error, needsApiKey: true };
+    }
+
+    return { success: true };
 }
 
 /**
@@ -97,7 +112,7 @@ export async function checkApiKeyAndInitClient() {
 export async function getSystemPrompt(): Promise<string> {
     return new Promise((resolve) => {
         chrome.storage.sync.get('systemPrompt', (result) => {
-            resolve(result.systemPrompt || DEFAULT_SYSTEM_PROMPT);
+            resolve(result.systemPrompt || DEFAULT_SUMMARY_SYSTEM_PROMPT);
         });
     });
 }
@@ -195,5 +210,92 @@ export async function generateSummary(
         }
     } catch (error: any) {
         onError('An unexpected error occurred');
+    }
+}
+
+/**
+ * Get chat system prompt from storage or use default
+ */
+export async function getChatSystemPrompt(): Promise<string> {
+    return new Promise((resolve) => {
+        chrome.storage.sync.get('chatSystemPrompt', (result) => {
+            resolve(result.chatSystemPrompt || DEFAULT_CHAT_SYSTEM_PROMPT);
+        });
+    });
+}
+
+/**
+ * Handle chat conversation with the AI about video content
+ */
+export async function chatWithAI(
+    transcript: string,
+    messages: ChatMessage[],
+    onChunk: (content: string) => void,
+    onComplete: () => void,
+    onError: (error: string, needsApiKey?: boolean) => void
+): Promise<void> {
+    try {
+        if (!client) {
+            const initResult = await initializeOpenAIClient();
+            if (!initResult.success) {
+                onError(initResult.error || 'Failed to initialize OpenAI client', true);
+                return;
+            }
+        }
+
+        // Get the custom chat system prompt and selected model
+        const chatSystemPrompt = await getChatSystemPrompt();
+        const model = await getModel();
+
+        // Truncate transcript if it's too long
+        const maxLength = 15000;
+        const truncatedTranscript = transcript.length > maxLength
+            ? transcript.substring(0, maxLength) + "..."
+            : transcript;
+
+        // Prepare the conversation messages
+        const contextMessage = `Context (YouTube video transcript): ${truncatedTranscript}`;
+        
+        // Build the complete message history
+        const completeMessages: ChatMessage[] = [
+            { role: 'system', content: `${chatSystemPrompt}\n\n${contextMessage}` },
+            ...messages
+        ];
+
+        try {
+            // Start stream
+            const stream = await client!.chat.completions.create({
+                model: model,
+                messages: completeMessages,
+                stream: true,
+            });
+
+            // Process stream chunks
+            for await (const chunk of stream) {
+                const content = chunk.choices[0]?.delta?.content || '';
+                if (content) {
+                    onChunk(content);
+                }
+            }
+
+            // Signal that streaming is complete
+            onComplete();
+        } catch (error: any) {
+            // Handle errors similarly to generateSummary
+            if (error?.status === 401 ||
+                error?.message?.includes('401') ||
+                error?.message?.includes('Incorrect API key provided')) {
+
+                await chrome.storage.sync.remove('openaiApiKey');
+                onError('Invalid API key. Please provide a valid OpenAI API key.', true);
+            } else if (error?.message?.includes('does not exist') ||
+                error?.message?.includes('invalid model')) {
+                onError(`Invalid model: "${await getModel()}". Please select a different model in settings.`);
+            } else {
+                onError('Failed to process chat with OpenAI: ' + (error.message || 'Unknown error'));
+            }
+        }
+    } catch (error: any) {
+        onError('An unexpected error occurred during chat');
     }
 }
