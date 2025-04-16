@@ -91,7 +91,7 @@ export function showSummaryOverlay(initialText: string = ''): void {
         justify-content: center;
         opacity: 0.7;
         transition: opacity 0.2s;
-        visibility: hidden;
+        visibility: visible;
     `;
     regenerateBtn.addEventListener('mouseover', () => {
         regenerateBtn.style.opacity = '1';
@@ -426,8 +426,14 @@ export function updateRegenerateButtonVisibility(): void {
     const stateKey = window.location.href;
     const isGenerating = generationState.get(stateKey) === true;
     
-    regenerateBtn.style.visibility = isGenerating ? 'hidden' : 'visible';
-    regenerateBtn.disabled = isGenerating;
+    // Make sure button is visible when generation is complete
+    if (!isGenerating) {
+        regenerateBtn.style.visibility = 'visible';
+        regenerateBtn.disabled = false;
+    } else {
+        regenerateBtn.style.visibility = 'hidden';
+        regenerateBtn.disabled = true;
+    }
 }
 
 // Switch between tabs

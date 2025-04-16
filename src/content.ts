@@ -1,5 +1,5 @@
 import { addSummarizeButton } from './components/SummarizeButton';
-import { showSummaryOverlay, updateMarkdownOverlay } from './components/SummaryOverlay';
+import { showSummaryOverlay, updateMarkdownOverlay, updateRegenerateButtonVisibility } from './components/SummaryOverlay';
 import { generationState, markdownContent } from './components/SummaryController';
 
 // Run when page loads
@@ -51,9 +51,19 @@ chrome.runtime.onMessage.addListener((message) => {
             // Mark generation as complete
             const stateKey = window.location.href;
             generationState.set(stateKey, false);
+            
+            // Update regenerate button visibility
+            updateRegenerateButtonVisibility();
         }
         
         if (message.action === 'summaryError') {
+            // Mark generation as complete on error
+            const stateKey = window.location.href;
+            generationState.set(stateKey, false);
+            
+            // Update regenerate button visibility
+            updateRegenerateButtonVisibility();
+            
             // Handle error display in the SummaryController component
         }
         
@@ -66,7 +76,7 @@ chrome.runtime.onMessage.addListener((message) => {
             // No action needed here - the conversation tab will handle these
         }
     } catch (err) {
-        // Error handling
+        console.error('Error processing message:', err);
     }
     
     // Always return true (acknowledge receipt) to prevent channel closing errors
