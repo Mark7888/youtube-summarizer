@@ -6,8 +6,12 @@ import {
   generateSummary, 
   resetClient,
   chatWithAI,
-  ChatMessage
+  ChatMessage,
+  cancelGeneration
 } from './services/openAIService';
+
+// Track active generations
+const activeGenerations = new Map<number, string>();
 
 // Listen for messages from content script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -23,7 +27,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     // Use Promise handling with proper response
-    handleSummarize(videoId, sendResponse)
+    handleSummarize(videoId, message.language, sendResponse)
       .catch(error => {
         sendResponse({
           success: false,
@@ -32,6 +36,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
     
     return true; // Keep the message channel open for async responses
+  }
+  
+  // Handle generation cancellation
+  if (message.action === 'cancelGeneration') {
+    // If tab ID is provided, cancel for that tab
+    if (sender.tab?.id) {
+      const tabId = sender.tab.id;
+      if (activeGenerations.has(tabId)) {
+        const generationId = activeGenerations.get(tabId);
+        console.log(`Cancelling generation ${generationId} for tab ${tabId}`);
+        
+        // Mark this generation as cancelled to prevent further updates
+        cancelGeneration(generationId);
+        
+        // Remove from active generations immediately
+        activeGenerations.delete(tabId);
+        
+        // Send a cancellation confirmation message
+        sendTabMessage(tabId, {
+          action: 'generationCancelled'
+        }).catch(err => {
+          // Ignore errors here
+        });
+      }
+    }
+    
+    sendResponse({ success: true, message: 'Cancellation requested' });
+    return true;
   }
   
   if (message.action === 'checkApiKey') {
@@ -60,9 +92,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'generateSummary' && sender.tab?.id) {
     const tabId = sender.tab.id;
     
+    // Store the generation ID
+    if (message.generationId) {
+      activeGenerations.set(tabId, message.generationId);
+    } else {
+      // Create a new generation ID if none provided
+      const generationId = Date.now().toString();
+      activeGenerations.set(tabId, generationId);
+      message.generationId = generationId;
+    }
+    
     // Important: Don't use await or Promise handling here
     // Just start the process and acknowledge receipt immediately
-    getSummaryOpenAI(message.transcript, tabId);
+    getSummaryOpenAI(message.transcript, tabId, message.language, message.generationId);
     
     // Send immediate acknowledgment and close the message channel
     sendResponse({ success: true, message: 'Summary generation started' });
@@ -84,7 +126,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 // Handle summarizing process - now returns a Promise
-async function handleSummarize(videoId: string, sendResponse: (response: any) => void): Promise<void> {
+async function handleSummarize(videoId: string, language: string | undefined, sendResponse: (response: any) => void): Promise<void> {
   try {
     // First, check if OpenAI client is initialized
     const initResult = await checkApiKeyAndInitClient();
@@ -97,8 +139,8 @@ async function handleSummarize(videoId: string, sendResponse: (response: any) =>
       return;
     }
 
-    // Fetch transcript
-    const transcriptResult = await fetchTranscript(videoId);
+    // Fetch transcript with language parameter
+    const transcriptResult = await fetchTranscript(videoId, language);
     
     if (!transcriptResult.success) {
       sendResponse({ 
@@ -112,7 +154,8 @@ async function handleSummarize(videoId: string, sendResponse: (response: any) =>
     sendResponse({
       success: true,
       action: 'prepareSummary',
-      transcript: transcriptResult.transcript
+      transcript: transcriptResult.transcript,
+      language: transcriptResult.language // Return the language that was actually used
     });
     
   } catch (error) {
@@ -147,33 +190,62 @@ function sendTabMessage(tabId: number, message: any): Promise<void> {
 }
 
 // Summarize transcript using OpenAI - now using the service
-async function getSummaryOpenAI(transcript: string, tabId: number): Promise<void> {
+async function getSummaryOpenAI(transcript: string, tabId: number, language?: string, generationId?: string): Promise<void> {
+  // Store this generation ID for potential cancellation
+  if (generationId) {
+    activeGenerations.set(tabId, generationId);
+  }
+  
   await generateSummary(
     transcript,
     // OnChunk handler
     (content) => {
-      sendTabMessage(tabId, {
-        action: 'updateSummary',
-        content: content
-      }).catch(err => {
-        // Continue processing - don't break the loop
-      });
+      // Only send if this generation is still active
+      if (!activeGenerations.has(tabId) || activeGenerations.get(tabId) === generationId) {
+        sendTabMessage(tabId, {
+          action: 'updateSummary',
+          content: content,
+          language: language,
+          generationId: generationId
+        }).catch(err => {
+          // Continue processing - don't break the loop
+        });
+      }
     },
     // OnComplete handler
     () => {
-      sendTabMessage(tabId, { action: 'summaryComplete' })
+      // Only send completion if this generation is still active
+      if (!activeGenerations.has(tabId) || activeGenerations.get(tabId) === generationId) {
+        sendTabMessage(tabId, { 
+          action: 'summaryComplete',
+          language: language,
+          generationId: generationId
+        })
         .catch(err => {
           // Error handling
         });
+        
+        // Remove from active generations upon completion
+        if (activeGenerations.get(tabId) === generationId) {
+          activeGenerations.delete(tabId);
+        }
+      }
     },
     // OnError handler
     (error, needsApiKey) => {
       sendTabMessage(tabId, {
         action: 'summaryError',
         error: error,
-        needsApiKey: needsApiKey
+        needsApiKey: needsApiKey,
+        generationId: generationId
       });
-    }
+      
+      // Remove from active generations on error
+      if (activeGenerations.get(tabId) === generationId) {
+        activeGenerations.delete(tabId);
+      }
+    },
+    generationId // Pass generation ID to allow cancellation
   );
 }
 
@@ -191,6 +263,9 @@ async function handleChatWithAI(transcript: string, messages: ChatMessage[], tab
       });
       return;
     }
+    
+    // Generate a unique ID for this chat generation
+    const generationId = `chat_${Date.now()}`;
     
     // Process chat through the OpenAI service
     await chatWithAI(
@@ -219,7 +294,8 @@ async function handleChatWithAI(transcript: string, messages: ChatMessage[], tab
           error: error,
           needsApiKey: needsApiKey
         });
-      }
+      },
+      generationId // Pass generation ID for possible cancellation
     );
   } catch (error: any) {
     sendTabMessage(tabId, {

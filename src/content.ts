@@ -1,6 +1,7 @@
 import { addSummarizeButton } from './components/SummarizeButton';
-import { showSummaryOverlay, updateMarkdownOverlay, updateRegenerateButtonVisibility } from './components/SummaryOverlay';
+import { showSummaryOverlay, updateSummaryOverlay, updateMarkdownOverlay } from './components/SummaryOverlay';
 import { generationState, markdownContent } from './components/SummaryController';
+import { showApiKeyPrompt } from './components/ApiKeyPrompt';
 
 // Run when page loads
 window.addEventListener('yt-navigate-finish', addSummarizeButton);
@@ -17,7 +18,7 @@ new MutationObserver(() => {
 }).observe(document, { subtree: true, childList: true });
 
 // Listen for messages from background script with proper error handling
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
         if (message.action === 'updateSummary') {
             // Get the current tab's key
@@ -45,6 +46,11 @@ chrome.runtime.onMessage.addListener((message) => {
                     // Error handling
                 });
             }
+            
+            // Pass generation ID to updateSummaryOverlay
+            updateSummaryOverlay(message.content, true, message.generationId);
+            sendResponse({ received: true });
+            return true;
         }
         
         if (message.action === 'summaryComplete') {
@@ -52,8 +58,10 @@ chrome.runtime.onMessage.addListener((message) => {
             const stateKey = window.location.href;
             generationState.set(stateKey, false);
             
-            // Update regenerate button visibility
-            updateRegenerateButtonVisibility();
+            // No need to update button visibility anymore
+            
+            sendResponse({ received: true });
+            return true;
         }
         
         if (message.action === 'summaryError') {
@@ -61,10 +69,25 @@ chrome.runtime.onMessage.addListener((message) => {
             const stateKey = window.location.href;
             generationState.set(stateKey, false);
             
-            // Update regenerate button visibility
-            updateRegenerateButtonVisibility();
+            // No need to update button visibility anymore
             
             // Handle error display in the SummaryController component
+            updateSummaryOverlay(`Error: ${message.error}`, false, message.generationId);
+            
+            if (message.needsApiKey) {
+                showApiKeyPrompt();
+            }
+            
+            sendResponse({ received: true });
+            return true;
+        }
+        
+        // Handle cancellation confirmation
+        if (message.action === 'generationCancelled') {
+            const stateKey = window.location.href;
+            generationState.set(stateKey, false);
+            sendResponse({ received: true });
+            return true;
         }
         
         // These are the chat actions - forward them to any listeners

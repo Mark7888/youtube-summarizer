@@ -27,6 +27,21 @@ export interface ChatMessage {
 
 var client: OpenAI | null = null;
 
+// Track active requests by ID for cancellation
+const activeRequests = new Map<string, AbortController>();
+
+// Cancel a specific generation by ID
+export function cancelGeneration(generationId?: string): void {
+  if (!generationId) return;
+  
+  const controller = activeRequests.get(generationId);
+  if (controller) {
+    controller.abort();
+    activeRequests.delete(generationId);
+    console.log(`Cancelled generation ${generationId}`);
+  }
+}
+
 /**
  * Initialize the OpenAI client with API key from storage
  */
@@ -143,9 +158,16 @@ export async function generateSummary(
     transcript: string,
     onChunk: (content: string) => void,
     onComplete: () => void,
-    onError: (error: string, needsApiKey?: boolean) => void
+    onError: (error: string, needsApiKey?: boolean) => void,
+    generationId?: string
 ): Promise<void> {
     try {
+        // Set up AbortController for cancellation
+        const controller = new AbortController();
+        if (generationId) {
+            activeRequests.set(generationId, controller);
+        }
+
         if (!client) {
             const initResult = await initializeOpenAIClient();
             if (!initResult.success) {
@@ -168,15 +190,20 @@ export async function generateSummary(
         const userPrompt = `Please summarize the following transcript from a YouTube video. Use markdown formatting to structure your response - include headers for main sections, bullet points for key details, and emphasis for important points.\n\n${truncatedTranscript}`;
 
         try {
-            // Start stream
-            const stream = await client!.chat.completions.create({
-                model: model,
-                messages: [
-                    { role: 'system', content: systemPrompt },
-                    { role: 'user', content: userPrompt }
-                ],
-                stream: true,
-            });
+            // Start stream - fixed to use the options parameter for the AbortController signal
+            const stream = await client!.chat.completions.create(
+                {
+                    model: model,
+                    messages: [
+                        { role: 'system', content: systemPrompt },
+                        { role: 'user', content: userPrompt }
+                    ],
+                    stream: true,
+                },
+                {
+                    signal: controller.signal,
+                }
+            );
 
             // Process stream chunks
             for await (const chunk of stream) {
@@ -189,6 +216,12 @@ export async function generateSummary(
             // Signal that streaming is complete
             onComplete();
         } catch (error: any) {
+            // Check if this is an abort error
+            if (error.name === 'AbortError') {
+                console.log('Request was aborted');
+                return; // Exit silently for aborted requests
+            }
+            
             // Check for 401 error (invalid API key)
             if (error?.status === 401 ||
                 error?.message?.includes('401') ||
@@ -208,8 +241,18 @@ export async function generateSummary(
                 onError('Failed to generate summary with OpenAI: ' + (error.message || 'Unknown error'));
             }
         }
+
+        // When complete, remove from active requests
+        if (generationId) {
+            activeRequests.delete(generationId);
+        }
     } catch (error: any) {
         onError('An unexpected error occurred');
+
+        // Clean up on error
+        if (generationId) {
+            activeRequests.delete(generationId);
+        }
     }
 }
 
@@ -232,9 +275,16 @@ export async function chatWithAI(
     messages: ChatMessage[],
     onChunk: (content: string) => void,
     onComplete: () => void,
-    onError: (error: string, needsApiKey?: boolean) => void
+    onError: (error: string, needsApiKey?: boolean) => void,
+    generationId?: string
 ): Promise<void> {
     try {
+        // Set up AbortController for cancellation if generationId is provided
+        const controller = new AbortController();
+        if (generationId) {
+            activeRequests.set(generationId, controller);
+        }
+
         if (!client) {
             const initResult = await initializeOpenAIClient();
             if (!initResult.success) {
@@ -263,12 +313,15 @@ export async function chatWithAI(
         ];
 
         try {
-            // Start stream
-            const stream = await client!.chat.completions.create({
-                model: model,
-                messages: completeMessages,
-                stream: true,
-            });
+            // Start stream - fixed to use the options parameter for the AbortController signal
+            const stream = await client!.chat.completions.create(
+                {
+                    model: model,
+                    messages: completeMessages,
+                    stream: true,
+                },
+                generationId ? { signal: controller.signal } : undefined
+            );
 
             // Process stream chunks
             for await (const chunk of stream) {
@@ -281,6 +334,12 @@ export async function chatWithAI(
             // Signal that streaming is complete
             onComplete();
         } catch (error: any) {
+            // Check if this is an abort error
+            if (error.name === 'AbortError') {
+                console.log('Chat request was aborted');
+                return; // Exit silently for aborted requests
+            }
+            
             // Handle errors similarly to generateSummary
             if (error?.status === 401 ||
                 error?.message?.includes('401') ||
@@ -295,7 +354,17 @@ export async function chatWithAI(
                 onError('Failed to process chat with OpenAI: ' + (error.message || 'Unknown error'));
             }
         }
+        
+        // When complete, remove from active requests
+        if (generationId) {
+            activeRequests.delete(generationId);
+        }
     } catch (error: any) {
         onError('An unexpected error occurred during chat');
+        
+        // Clean up on error
+        if (generationId) {
+            activeRequests.delete(generationId);
+        }
     }
 }

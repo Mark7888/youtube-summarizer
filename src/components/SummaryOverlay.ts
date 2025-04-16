@@ -5,9 +5,14 @@ import transcriptTab from '../tabs/transcriptTab';
 import conversationTab from '../tabs/conversationTab';
 import { generationState, markdownContent, startSummarization } from './SummaryController';
 import { makeDraggable, addResizeHandles, adjustOverlayHeight } from './UiUtils';
+import { getAvailableLanguages, LanguageOption } from '../services/youtubeTranscriptService';
 
 // Track active tab
 let activeTab: TabType = 'summary';
+
+// Track currently selected language
+let currentLanguage: string | undefined;
+let availableLanguages: LanguageOption[] = [];
 
 // Create and show the summary overlay with additional buttons
 export function showSummaryOverlay(initialText: string = ''): void {
@@ -67,42 +72,16 @@ export function showSummaryOverlay(initialText: string = ''): void {
     title.style.margin = '0';
     headerLeft.appendChild(title);
     
+    // Language selector button
+    const languageBtn = createLanguageButton();
+    headerLeft.appendChild(languageBtn);
+    
     // Copy button
     const copyBtn = createCopyButton();
     headerLeft.appendChild(copyBtn);
     
     // Regenerate button (refresh icon)
-    const regenerateBtn = document.createElement('button');
-    regenerateBtn.className = 'yt-summarizer-regenerate-btn';
-    regenerateBtn.innerHTML = `
-        <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 0 24 24" fill="#555">
-            <path d="M17.65 6.35c-1.63-1.63-3.94-2.57-6.48-2.31-3.67.37-6.69 3.35-7.1 7.02C3.52 15.91 7.27 20 12 20c3.19 0 5.93-1.87 7.21-4.56.32-.67-.16-1.44-.9-1.44-.37 0-.72.2-.88.53-1.13 2.43-3.84 3.97-6.8 3.31-2.22-.49-4.01-2.3-4.48-4.52-.82-3.88 2.24-7.32 5.95-7.32 1.57 0 2.97.6 4.05 1.56L13 10h9V1l-4.35 4.35z"/>
-        </svg>
-    `;
-    regenerateBtn.title = "Regenerate summary";
-    regenerateBtn.style.cssText = `
-        background: none;
-        border: none;
-        cursor: pointer;
-        padding: 3px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        opacity: 0.7;
-        transition: opacity 0.2s;
-        visibility: visible;
-    `;
-    regenerateBtn.addEventListener('mouseover', () => {
-        regenerateBtn.style.opacity = '1';
-    });
-    regenerateBtn.addEventListener('mouseout', () => {
-        regenerateBtn.style.opacity = '0.7';
-    });
-    regenerateBtn.addEventListener('click', () => {
-        const videoUrl = window.location.href;
-        startSummarization(videoUrl);
-    });
+    const regenerateBtn = createRegenerateButton();
     headerLeft.appendChild(regenerateBtn);
     
     // Right side - pin, minimize and close buttons
@@ -215,9 +194,34 @@ export function showSummaryOverlay(initialText: string = ''): void {
         padding: 0 5px;
     `;
     closeBtn.onclick = () => {
-        overlay.remove();
-        // Clear generation state when closing
-        generationState.delete(window.location.href);
+        // Cancel any active generation when closing the overlay
+        const stateKey = window.location.href;
+        if (generationState.get(stateKey) === true) {
+            // First, indicate that we're cancelling
+            updateSummaryOverlay('Cancelling generation...');
+            
+            // Import cancelGeneration directly to avoid circular imports
+            try {
+                chrome.runtime.sendMessage({
+                    action: 'cancelGeneration',
+                    url: stateKey
+                });
+                
+                // Add delay before actually closing to ensure no more updates come in
+                setTimeout(() => {
+                    overlay.remove();
+                    generationState.delete(window.location.href);
+                }, 300); // 300ms delay should be enough for most cases
+            } catch (err) {
+                console.error('Failed to cancel generation:', err);
+                overlay.remove();
+                generationState.delete(window.location.href);
+            }
+        } else {
+            // If no generation is active, close immediately
+            overlay.remove();
+            generationState.delete(window.location.href);
+        }
     };
     headerRight.appendChild(closeBtn);
     
@@ -365,117 +369,216 @@ export function showSummaryOverlay(initialText: string = ''): void {
     // Make the overlay draggable with pin functionality
     makeDraggable(overlay, header, pinBtn);
     
-    // Update regenerate button visibility based on current state
-    updateRegenerateButtonVisibility();
+    // Load available languages after overlay is displayed
+    loadAvailableLanguages();
 }
 
-// Update the content of the summary overlay
-export function updateSummaryOverlay(text: string, append: boolean = false): void {
-    const content = document.querySelector('.yt-summarizer-content');
-    if (content) {
-        if (append) {
-            // For appending, just add to the current content
-            content.textContent += text;
-        } else {
-            // For replacing, set the text directly
-            content.textContent = text;
-            
-            // Reset markdown content for this page
-            markdownContent.set(window.location.href, text);
-        }
-        
-        // Adjust container height based on content
-        setTimeout(() => adjustOverlayHeight(), 10);
-    } else {
-        // If overlay doesn't exist yet, create it
-        showSummaryOverlay(text);
-    }
-}
-
-// Update the overlay with markdown content
-export async function updateMarkdownOverlay(markdownText: string): Promise<void> {
-    const content = document.querySelector('.yt-summarizer-content') as HTMLElement;
-    if (!content) return;
-    
-    try {
-        // Render and sanitize markdown - handling async nature
-        const html = await renderMarkdown(markdownText);
-        const safeHtml = sanitizeHtml(html);
-        
-        // Update the content
-        content.innerHTML = safeHtml;
-        
-        // Add bottom padding to ensure scrolling works properly
-        const paddingElement = document.createElement('div');
-        paddingElement.style.height = '20px';
-        paddingElement.style.width = '100%';
-        content.appendChild(paddingElement);
-        
-        // Adjust container height based on content
-        setTimeout(() => adjustOverlayHeight(), 10);
-    } catch (error) {
-        content.textContent = markdownText;
-    }
-}
-
-// Function to update regenerate button visibility
-export function updateRegenerateButtonVisibility(): void {
-    const regenerateBtn = document.querySelector('.yt-summarizer-regenerate-btn') as HTMLButtonElement;
-    if (!regenerateBtn) return;
-    
-    const stateKey = window.location.href;
-    const isGenerating = generationState.get(stateKey) === true;
-    
-    // Make sure button is visible when generation is complete
-    if (!isGenerating) {
-        regenerateBtn.style.visibility = 'visible';
-        regenerateBtn.disabled = false;
-    } else {
-        regenerateBtn.style.visibility = 'hidden';
-        regenerateBtn.disabled = true;
-    }
-}
-
-// Switch between tabs
-export function switchTab(tabType: TabType): void {
-    // Skip if already on this tab
-    if (activeTab === tabType) return;
-    
-    // Update active tab state
-    const prevTab = activeTab;
-    activeTab = tabType;
-    
-    // Update tab styling
-    const tabs = document.querySelectorAll('.yt-summarizer-tab');
-    tabs.forEach(tab => {
-        if ((tab as HTMLElement).dataset.tabType === tabType) {
-            tab.classList.add('active');
-            (tab as HTMLElement).style.backgroundColor = '#eaeaea';
-            (tab as HTMLElement).style.borderBottom = '2px solid #4285f4';
-        } else {
-            tab.classList.remove('active');
-            (tab as HTMLElement).style.backgroundColor = '#f9f9f9';
-            (tab as HTMLElement).style.borderBottom = '2px solid transparent';
-        }
+// Function to create language selector button
+function createLanguageButton(): HTMLButtonElement {
+    const languageBtn = document.createElement('button');
+    languageBtn.className = 'yt-summarizer-language-btn';
+    languageBtn.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 0 24 24" fill="#555">
+            <path d="M12.87 15.07l-2.54-2.51.03-.03c1.74-1.94 2.98-4.17 3.71-6.53H17V4h-7V2H8v2H1v1.99h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/>
+        </svg>
+    `;
+    languageBtn.title = "Select language";
+    languageBtn.style.cssText = `
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 3px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0.7;
+        transition: opacity 0.2s;
+    `;
+    languageBtn.addEventListener('mouseover', () => {
+        languageBtn.style.opacity = '1';
+    });
+    languageBtn.addEventListener('mouseout', () => {
+        languageBtn.style.opacity = '0.7';
     });
     
-    // Deactivate previous tab handler
-    if (prevTab === 'summary') summaryTab.deactivate();
-    if (prevTab === 'transcript') transcriptTab.deactivate();
-    if (prevTab === 'conversation') conversationTab.deactivate();
+    // Add click handler to show language popup
+    languageBtn.addEventListener('click', (event) => {
+        event.stopPropagation(); // Stop event from bubbling up
+        showLanguagePopup(languageBtn);
+    });
     
-    // Activate new tab handler
-    activateTab(tabType);
-    
-    // Adjust container height based on content
-    setTimeout(() => adjustOverlayHeight(), 10);
+    return languageBtn;
 }
 
-// Activate a specific tab
-function activateTab(tabType: TabType): void {
-    if (tabType === 'summary') summaryTab.activate();
-    if (tabType === 'transcript') transcriptTab.activate();
-    if (tabType === 'conversation') conversationTab.activate();
+// Show language selector popup
+function showLanguagePopup(button: HTMLButtonElement): void {
+    // Remove existing popup if any
+    const existingPopup = document.querySelector('.yt-summarizer-language-popup');
+    if (existingPopup) {
+        existingPopup.remove();
+        return;
+    }
+    
+    // Get button's position relative to the viewport
+    const buttonRect = button.getBoundingClientRect();
+    
+    // Create popup container
+    const popup = document.createElement('div');
+    popup.className = 'yt-summarizer-language-popup';
+    popup.style.cssText = `
+        position: fixed;
+        top: ${buttonRect.bottom + window.scrollY}px;
+        left: ${buttonRect.left + window.scrollX}px;
+        background-color: white;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        max-height: 300px;
+        overflow-y: auto;
+        z-index: 10000;
+        min-width: 200px;
+    `;
+    
+    // Add title to popup
+    const popupTitle = document.createElement('div');
+    popupTitle.textContent = 'Select Language';
+    popupTitle.style.cssText = `
+        padding: 8px 12px;
+        font-weight: bold;
+        border-bottom: 1px solid #eee;
+        background-color: #f9f9f9;
+        position: sticky;
+        top: 0;
+    `;
+    popup.appendChild(popupTitle);
+    
+    // Create language list
+    const list = document.createElement('ul');
+    list.style.cssText = `
+        list-style: none;
+        margin: 0;
+        padding: 0;
+    `;
+    
+    // Add loading indicator initially
+    if (availableLanguages.length === 0) {
+        const loadingItem = document.createElement('li');
+        loadingItem.textContent = 'Loading languages...';
+        loadingItem.style.cssText = `
+            padding: 8px 12px;
+            cursor: default;
+            color: #666;
+        `;
+        list.appendChild(loadingItem);
+    } else {
+        // Add languages to list
+        availableLanguages.forEach(lang => {
+            const item = document.createElement('li');
+            item.textContent = lang.name;
+            item.dataset.langCode = lang.code;
+            
+            // Highlight current language and make it disabled
+            if (lang.code === currentLanguage) {
+                item.style.cssText = `
+                    padding: 8px 12px;
+                    cursor: default;
+                    background-color: #f0f0f0;
+                    color: #999;
+                    font-style: italic;
+                `;
+                item.textContent += ' (current)';
+            } else {
+                item.style.cssText = `
+                    padding: 8px 12px;
+                    cursor: pointer;
+                `;
+                
+                // Add hover effect
+                item.addEventListener('mouseover', () => {
+                    item.style.backgroundColor = '#f5f5f5';
+                });
+                item.addEventListener('mouseout', () => {
+                    item.style.backgroundColor = 'transparent';
+                });
+                
+                // Add click handler
+                item.addEventListener('click', () => {
+                    changeLanguage(lang.code);
+                    popup.remove();
+                });
+            }
+            list.appendChild(item);
+        });
+    }
+    
+    popup.appendChild(list);
+    
+    // Add popup to body
+    document.body.appendChild(popup);
+    
+    // Close popup when clicking outside
+    const closePopup = (e: MouseEvent) => {
+        if (!popup.contains(e.target as Node) && e.target !== button) {
+            popup.remove();
+            document.removeEventListener('click', closePopup);
+        }
+    };
+    
+    // Use setTimeout to avoid immediate triggering of the click event
+    setTimeout(() => {
+        document.addEventListener('click', closePopup);
+    }, 0);
+}
+
+// Load available languages for the current video
+async function loadAvailableLanguages(): Promise<void> {
+    const videoId = new URLSearchParams(window.location.search).get('v'); // TODO - the youtube transcript api has a function for this
+    if (!videoId) return;
+    
+    try {
+        availableLanguages = await getAvailableLanguages(videoId);
+    } catch (error) {
+        console.error('Failed to load languages:', error);
+        availableLanguages = [];
+    }
+}
+
+// Change the transcript language and reload content
+function changeLanguage(languageCode: string): void {
+    if (languageCode === currentLanguage) return;
+    
+    // Update current language
+    currentLanguage = languageCode;
+    
+    // Get current state
+    const videoUrl = window.location.href;
+    
+    // Clear any existing content first
+    const contentElements = document.querySelectorAll('.yt-summarizer-content');
+    contentElements.forEach(element => {
+        element.textContent = 'Loading...';
+    });
+    
+    // Start the new summarization with the selected language
+    startSummarization(videoUrl, currentLanguage);
+    
+    // Update UI to reflect language change
+    updateLanguageUI();
+}
+
+// Update UI to reflect current language
+function updateLanguageUI(): void {
+    const languageBtn = document.querySelector('.yt-summarizer-language-btn') as HTMLButtonElement;
+    if (!languageBtn) return;
+    
+    // Update button title with current language
+    if (currentLanguage && availableLanguages.length > 0) {
+        const langName = availableLanguages.find(l => l.code === currentLanguage)?.name || currentLanguage;
+        languageBtn.title = `Language: ${langName}`;
+    } else {
+        languageBtn.title = "Select language";
+    }
 }
 
 // Function to handle copy button creation with tab-aware copying
@@ -555,4 +658,161 @@ function createCopyButton(): HTMLButtonElement {
         }
     });
     return copyBtn;
+}
+
+function createRegenerateButton(): HTMLButtonElement {
+    const regenerateBtn = document.createElement('button');
+    regenerateBtn.className = 'yt-summarizer-regenerate-btn';
+    regenerateBtn.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 0 24 24" fill="#555">
+            <path d="M17.65 6.35c-1.63-1.63-3.94-2.57-6.48-2.31-3.67.37-6.69 3.35-7.1 7.02C3.52 15.91 7.27 20 12 20c3.19 0 5.93-1.87 7.21-4.56.32-.67-.16-1.44-.9-1.44-.37 0-.72.2-.88.53-1.13 2.43-3.84 3.97-6.8 3.31-2.22-.49-4.01-2.3-4.48-4.52-.82-3.88 2.24-7.32 5.95-7.32 1.57 0 2.97.6 4.05 1.56L13 10h9V1l-4.35 4.35z"/>
+        </svg>
+    `;
+    regenerateBtn.title = "Regenerate summary";
+    regenerateBtn.style.cssText = `
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 3px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0.7;
+        transition: opacity 0.2s;
+    `;
+    regenerateBtn.addEventListener('mouseover', () => {
+        regenerateBtn.style.opacity = '1';
+    });
+    regenerateBtn.addEventListener('mouseout', () => {
+        regenerateBtn.style.opacity = '0.7';
+    });
+    regenerateBtn.addEventListener('click', () => {
+        const videoUrl = window.location.href;
+        startSummarization(videoUrl, currentLanguage);
+    });
+
+    return regenerateBtn;
+}
+
+// Update the content of the summary overlay
+export function updateSummaryOverlay(text: string, append: boolean = false, generationId?: string): void {
+    const content = document.querySelector('.yt-summarizer-content');
+    if (content) {
+        // Get current generation language
+        const stateKey = window.location.href;
+        const storedGenerationId = content.getAttribute('data-generation-id');
+        
+        // If this is a different generation ID and we're appending, don't append
+        if (append && generationId && storedGenerationId && generationId !== storedGenerationId) {
+            console.log('Ignoring update from outdated generation');
+            return;
+        }
+        
+        if (append) {
+            // Only append if we're dealing with the same generation
+            if (!generationId || !storedGenerationId || generationId === storedGenerationId) {
+                content.textContent += text;
+            }
+        } else {
+            // For replacing, set the text directly and update generation ID
+            content.textContent = text;
+            
+            // Store the generation ID if provided
+            if (generationId) {
+                content.setAttribute('data-generation-id', generationId);
+            } else {
+                // If no ID provided, generate a new one
+                content.setAttribute('data-generation-id', Date.now().toString());
+            }
+            
+            // Reset markdown content for this page
+            markdownContent.set(window.location.href, text);
+        }
+        
+        // Adjust container height based on content
+        setTimeout(() => adjustOverlayHeight(), 10);
+    } else {
+        // If overlay doesn't exist yet, create it
+        showSummaryOverlay(text);
+        
+        // Set generation ID on the new content
+        const newContent = document.querySelector('.yt-summarizer-content');
+        if (newContent && generationId) {
+            newContent.setAttribute('data-generation-id', generationId);
+        }
+    }
+}
+
+// Update the overlay with markdown content
+export async function updateMarkdownOverlay(markdownText: string): Promise<void> {
+    const content = document.querySelector('.yt-summarizer-content') as HTMLElement;
+    if (!content) return;
+    
+    try {
+        // Render and sanitize markdown - handling async nature
+        const html = await renderMarkdown(markdownText);
+        const safeHtml = sanitizeHtml(html);
+        
+        // Update the content
+        content.innerHTML = safeHtml;
+        
+        // Add bottom padding to ensure scrolling works properly
+        const paddingElement = document.createElement('div');
+        paddingElement.style.height = '20px';
+        paddingElement.style.width = '100%';
+        content.appendChild(paddingElement);
+        
+        // Adjust container height based on content
+        setTimeout(() => adjustOverlayHeight(), 10);
+    } catch (error) {
+        content.textContent = markdownText;
+    }
+}
+
+// Switch between tabs
+export function switchTab(tabType: TabType): void {
+    // Skip if already on this tab
+    if (activeTab === tabType) return;
+    
+    // Update active tab state
+    const prevTab = activeTab;
+    activeTab = tabType;
+    
+    // Update tab styling
+    const tabs = document.querySelectorAll('.yt-summarizer-tab');
+    tabs.forEach(tab => {
+        if ((tab as HTMLElement).dataset.tabType === tabType) {
+            tab.classList.add('active');
+            (tab as HTMLElement).style.backgroundColor = '#eaeaea';
+            (tab as HTMLElement).style.borderBottom = '2px solid #4285f4';
+        } else {
+            tab.classList.remove('active');
+            (tab as HTMLElement).style.backgroundColor = '#f9f9f9';
+            (tab as HTMLElement).style.borderBottom = '2px solid transparent';
+        }
+    });
+    
+    // Deactivate previous tab handler
+    if (prevTab === 'summary') summaryTab.deactivate();
+    if (prevTab === 'transcript') transcriptTab.deactivate();
+    if (prevTab === 'conversation') conversationTab.deactivate();
+    
+    // Activate new tab handler
+    activateTab(tabType);
+    
+    // Adjust container height based on content
+    setTimeout(() => adjustOverlayHeight(), 10);
+}
+
+// Activate a specific tab
+function activateTab(tabType: TabType): void {
+    if (tabType === 'summary') summaryTab.activate();
+    if (tabType === 'transcript') transcriptTab.activate();
+    if (tabType === 'conversation') conversationTab.activate();
+}
+
+// Export current language for other components to use
+export function getCurrentLanguage(): string | undefined {
+    return currentLanguage;
 }

@@ -1,4 +1,5 @@
 import { startSummarization } from './SummaryController';
+import { getCurrentLanguage } from './SummaryOverlay';
 
 // Show API key prompt overlay
 export function showApiKeyPrompt(): void {
@@ -84,15 +85,17 @@ export function showApiKeyPrompt(): void {
                 // Hide the message after 1.5 seconds and close the popup
                 setTimeout(() => {
                     document.body.removeChild(overlay);
-                    // Try to summarize again
+                    // Try to summarize again with the current language
                     const videoUrl = window.location.href;
-                    startSummarization(videoUrl);
+                    const currentLanguage = getCurrentLanguage();
+                    startSummarization(videoUrl, currentLanguage);
                 }, 1500);
             } else {
                 document.body.removeChild(overlay);
-                // Try to summarize again
+                // Try to summarize again with the current language
                 const videoUrl = window.location.href;
-                startSummarization(videoUrl);
+                const currentLanguage = getCurrentLanguage();
+                startSummarization(videoUrl, currentLanguage);
             }
             
             // Reset the OpenAI client in the background script

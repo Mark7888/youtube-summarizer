@@ -22,7 +22,6 @@
     "marked": "^15.0.7",
     "marked-gfm-heading-id": "^4.1.1",
     "marked-highlight": "^2.2.1",
-    "openai": "^4.86.1",
-    "youtube-transcript": "^1.2.1"
+    "openai": "^4.86.1"
   }
 }

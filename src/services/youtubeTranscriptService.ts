@@ -1,8 +1,19 @@
-import { YoutubeTranscript } from 'youtube-transcript';
+import { 
+    YoutubeTranscript, 
+    TranscriptResponse, 
+    CaptionTrack, 
+    YoutubeTranscriptError 
+} from '../apis/youtubeTranscriptApi';
+
+export interface LanguageOption {
+    code: string;
+    name: string;
+}
 
 export interface TranscriptResult {
     success: boolean;
     transcript?: string;
+    language?: string;
     error?: string;
 }
 
@@ -10,34 +21,67 @@ export interface TranscriptResult {
  * Extract video ID from YouTube URL
  */
 export function extractVideoId(url: string): string | null {
-    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
-    const match = url.match(regExp);
-    return (match && match[2].length === 11) ? match[2] : null;
+    try {
+        return YoutubeTranscript.retrieveVideoId(url);
+    } catch (error) {
+        console.error('Failed to extract video ID:', error);
+        return null;
+    }
 }
 
 /**
- * Fetch transcript for a YouTube video
+ * Fetch transcript for a YouTube video with optional language
  */
-export async function fetchTranscript(videoId: string): Promise<TranscriptResult> {
+export async function fetchTranscript(videoId: string, language?: string): Promise<TranscriptResult> {
     try {
-        const transcript = await YoutubeTranscript.fetchTranscript(videoId);
-        const fullTranscript = transcript.map(part => part.text).join(' ');
-
-        if (fullTranscript.length === 0) {
-            return {
-                success: false,
-                error: 'No transcript available for this video'
-            };
-        }
-
+        // Fetch transcript with specified language if provided
+        const transcriptData = await YoutubeTranscript.fetchTranscript(videoId, {
+            lang: language,
+            forceReload: true // Always reload when language might have changed
+        });
+        
+        // Process transcript into a string
+        const transcriptText = processTranscriptToText(transcriptData);
+        
+        // Return success with transcript and language
         return {
             success: true,
-            transcript: fullTranscript
+            transcript: transcriptText,
+            language: transcriptData[0]?.lang // Return the actual language used
         };
     } catch (error) {
+        console.error('Failed to fetch transcript:', error);
         return {
             success: false,
-            error: error instanceof Error ? error.message : 'Failed to fetch transcript'
+            error: error instanceof YoutubeTranscriptError 
+                ? error.message 
+                : 'Failed to retrieve transcript'
         };
     }
+}
+
+/**
+ * Get available languages for a video
+ */
+export async function getAvailableLanguages(videoId: string): Promise<LanguageOption[]> {
+    try {
+        const languages = await YoutubeTranscript.getLanguages(videoId, true);
+        return languages.map(track => ({
+            code: track.languageCode,
+            name: track.name?.simpleText || track.languageCode
+        }));
+    } catch (error) {
+        console.error('Failed to get available languages:', error);
+        return [];
+    }
+}
+
+/**
+ * Convert transcript data to readable text
+ */
+function processTranscriptToText(transcriptData: TranscriptResponse[]): string {
+    return transcriptData
+        .map(item => item.text.trim())
+        .join(' ')
+        .replace(/\s+/g, ' ');
 }
