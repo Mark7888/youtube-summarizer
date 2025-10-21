@@ -5,13 +5,14 @@ import transcriptTab from '../tabs/transcriptTab';
 import conversationTab from '../tabs/conversationTab';
 import { generationState, markdownContent, startSummarization } from './SummaryController';
 import { makeDraggable, addResizeHandles, adjustOverlayHeight } from './UiUtils';
-import { getAvailableLanguages, LanguageOption } from '../services/youtubeTranscriptService';
+import { getAvailableLanguages, LanguageOption } from '../services/youtubeTranscriptContentService';
 
 // Track active tab
 let activeTab: TabType = 'summary';
 
-// Track currently selected language
-let currentLanguage: string | undefined;
+// Track currently selected language/track
+let currentLanguageCode: string | undefined; // For API calls
+let currentLanguageVssId: string | undefined; // For UI comparison (unique identifier)
 let availableLanguages: LanguageOption[] = [];
 
 // Create and show the summary overlay with additional buttons
@@ -477,9 +478,11 @@ function showLanguagePopup(button: HTMLButtonElement): void {
             const item = document.createElement('li');
             item.textContent = lang.name;
             item.dataset.langCode = lang.code;
+            item.dataset.vssId = lang.vssId;
             
             // Highlight current language and make it disabled
-            if (lang.code === currentLanguage) {
+            // Compare by vssId to distinguish between manual and auto-generated
+            if (lang.vssId === currentLanguageVssId) {
                 item.style.cssText = `
                     padding: 8px 12px;
                     cursor: default;
@@ -504,7 +507,7 @@ function showLanguagePopup(button: HTMLButtonElement): void {
                 
                 // Add click handler
                 item.addEventListener('click', () => {
-                    changeLanguage(lang.code);
+                    changeLanguage(lang.code, lang.vssId);
                     popup.remove();
                 });
             }
@@ -545,11 +548,12 @@ async function loadAvailableLanguages(): Promise<void> {
 }
 
 // Change the transcript language and reload content
-function changeLanguage(languageCode: string): void {
-    if (languageCode === currentLanguage) return;
+function changeLanguage(languageCode: string, vssId: string): void {
+    if (vssId === currentLanguageVssId) return;
     
     // Update current language
-    currentLanguage = languageCode;
+    currentLanguageCode = languageCode;
+    currentLanguageVssId = vssId;
     
     // Get current state
     const videoUrl = window.location.href;
@@ -561,7 +565,7 @@ function changeLanguage(languageCode: string): void {
     });
     
     // Start the new summarization with the selected language
-    startSummarization(videoUrl, currentLanguage);
+    startSummarization(videoUrl, currentLanguageCode);
     
     // Update UI to reflect language change
     updateLanguageUI();
@@ -573,8 +577,8 @@ function updateLanguageUI(): void {
     if (!languageBtn) return;
     
     // Update button title with current language
-    if (currentLanguage && availableLanguages.length > 0) {
-        const langName = availableLanguages.find(l => l.code === currentLanguage)?.name || currentLanguage;
+    if (currentLanguageVssId && availableLanguages.length > 0) {
+        const langName = availableLanguages.find(l => l.vssId === currentLanguageVssId)?.name || currentLanguageCode || 'Unknown';
         languageBtn.title = `Language: ${langName}`;
     } else {
         languageBtn.title = "Select language";
@@ -689,7 +693,7 @@ function createRegenerateButton(): HTMLButtonElement {
     });
     regenerateBtn.addEventListener('click', () => {
         const videoUrl = window.location.href;
-        startSummarization(videoUrl, currentLanguage);
+        startSummarization(videoUrl, currentLanguageCode);
     });
 
     return regenerateBtn;
@@ -814,5 +818,13 @@ function activateTab(tabType: TabType): void {
 
 // Export current language for other components to use
 export function getCurrentLanguage(): string | undefined {
-    return currentLanguage;
+    return currentLanguageCode;
+}
+
+// Set the current language when transcript is loaded
+// This is called from SummaryController when a transcript is successfully fetched
+export function setCurrentLanguage(languageCode: string | undefined, vssId: string | undefined): void {
+    currentLanguageCode = languageCode;
+    currentLanguageVssId = vssId;
+    updateLanguageUI();
 }

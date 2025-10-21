@@ -14,6 +14,7 @@ export interface TranscriptResult {
     success: boolean;
     transcript?: string;
     language?: string;
+    vssId?: string; // Track identifier used
     error?: string;
 }
 
@@ -43,11 +44,12 @@ export async function fetchTranscript(videoId: string, language?: string): Promi
         // Process transcript into a string
         const transcriptText = processTranscriptToText(transcriptData);
         
-        // Return success with transcript and language
+        // Return success with transcript, language, and vssId
         return {
             success: true,
             transcript: transcriptText,
-            language: transcriptData[0]?.lang // Return the actual language used
+            language: transcriptData[0]?.lang, // Return the actual language used
+            vssId: transcriptData[0]?.vssId // Return the actual track identifier
         };
     } catch (error) {
         console.error('Failed to fetch transcript:', error);

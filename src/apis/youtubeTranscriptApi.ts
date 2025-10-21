@@ -53,16 +53,19 @@ export interface TranscriptResponse {
     duration: number;
     offset: number;
     lang?: string;
+    vssId?: string;
 }
 
 export interface CaptionTrack {
     languageCode: string;
     name?: {
-        simpleText: string;
+        simpleText?: string;
+        runs?: Array<{ text: string }>;
     };
     baseUrl?: string;
     url?: string;
     kind?: string;
+    vssId?: string;
 }
 
 export interface TranscriptCache {

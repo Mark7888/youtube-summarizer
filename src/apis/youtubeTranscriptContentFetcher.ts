@@ -9,11 +9,13 @@ const RE_XML_TRANSCRIPT = /<text start="([^"]*)" dur="([^"]*)">([^<]*)<\/text>/g
 export interface CaptionTrack {
     languageCode: string;
     name?: {
-        simpleText: string;
+        simpleText?: string;
+        runs?: Array<{ text: string }>;
     };
     baseUrl?: string;
     url?: string;
     kind?: string;
+    vssId?: string;
 }
 
 export interface TranscriptSegment {
@@ -21,6 +23,7 @@ export interface TranscriptSegment {
     duration: number;
     offset: number;
     lang?: string;
+    vssId?: string; // Track identifier to know which specific track was used
 }
 
 export class YoutubeTranscriptContentFetcher {
@@ -147,6 +150,7 @@ export class YoutubeTranscriptContentFetcher {
                 duration: parseFloat(result[2]),
                 offset: parseFloat(result[1]),
                 lang: selectedTrack.languageCode,
+                vssId: selectedTrack.vssId,
             }));
         } catch (error: any) {
             throw new Error(error.message || 'Failed to fetch transcript');

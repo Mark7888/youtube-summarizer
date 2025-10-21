@@ -1,4 +1,4 @@
-import { showSummaryOverlay, updateSummaryOverlay, getCurrentLanguage } from './SummaryOverlay';
+import { showSummaryOverlay, updateSummaryOverlay, getCurrentLanguage, setCurrentLanguage } from './SummaryOverlay';
 import transcriptTab from '../tabs/transcriptTab';
 import { showApiKeyPrompt } from './ApiKeyPrompt';
 import conversationTab from '../tabs/conversationTab';
@@ -61,6 +61,11 @@ export function startSummarization(videoUrl: string, language?: string | undefin
                 
                 if (response.action === 'prepareSummary') {
                     updateSummaryOverlay('Generating summary...');
+                    
+                    // Set the current language based on what was actually used
+                    if (response.language || response.vssId) {
+                        setCurrentLanguage(response.language, response.vssId);
+                    }
                     
                     // If we have a transcript, pass it to the transcript tab
                     if (response.transcript) {

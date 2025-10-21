@@ -155,7 +155,8 @@ async function handleSummarize(videoId: string, language: string | undefined, se
       success: true,
       action: 'prepareSummary',
       transcript: transcriptResult.transcript,
-      language: transcriptResult.language // Return the language that was actually used
+      language: transcriptResult.language, // Return the language that was actually used
+      vssId: transcriptResult.vssId // Return the track identifier
     });
     
   } catch (error) {
