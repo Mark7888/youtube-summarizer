@@ -2,6 +2,8 @@ import { addSummarizeButton } from './components/SummarizeButton';
 import { showSummaryOverlay, updateSummaryOverlay, updateMarkdownOverlay } from './components/SummaryOverlay';
 import { generationState, markdownContent } from './components/SummaryController';
 import { showApiKeyPrompt } from './components/ApiKeyPrompt';
+import { YoutubeTranscriptContentFetcher } from './apis/youtubeTranscriptContentFetcher';
+import type { TranscriptMessage, TranscriptResponse } from './types/transcriptMessages';
 
 // Run when page loads
 window.addEventListener('yt-navigate-finish', addSummarizeButton);
@@ -104,4 +106,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     
     // Always return true (acknowledge receipt) to prevent channel closing errors
     return true;
+});
+
+// Add message listener for transcript requests
+chrome.runtime.onMessage.addListener((message: TranscriptMessage, sender, sendResponse) => {
+    if (message.type === 'FETCH_TRANSCRIPT') {
+        YoutubeTranscriptContentFetcher.fetchTranscript(message.videoId, message.lang)
+            .then(data => {
+                sendResponse({ success: true, data });
+            })
+            .catch(error => {
+                sendResponse({ 
+                    success: false, 
+                    error: error.message,
+                    errorType: error.message.split(':')[0]
+                });
+            });
+        return true; // Keep channel open for async response
+    }
+    
+    if (message.type === 'GET_LANGUAGES') {
+        YoutubeTranscriptContentFetcher.getLanguages(message.videoId)
+            .then(data => {
+                sendResponse({ success: true, data });
+            })
+            .catch(error => {
+                sendResponse({ 
+                    success: false, 
+                    error: error.message,
+                    errorType: error.message.split(':')[0]
+                });
+            });
+        return true; // Keep channel open for async response
+    }
 });

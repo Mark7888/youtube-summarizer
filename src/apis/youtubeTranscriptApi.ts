@@ -1,9 +1,5 @@
 const RE_YOUTUBE =
     /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/i;
-const USER_AGENT =
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.83 Safari/537.36,gzip(gfe)';
-const RE_XML_TRANSCRIPT =
-    /<text start="([^"]*)" dur="([^"]*)">([^<]*)<\/text>/g;
 
 export class YoutubeTranscriptError extends Error {
     constructor(message: string) {
@@ -49,7 +45,7 @@ export class YoutubeTranscriptNotAvailableLanguageError extends YoutubeTranscrip
 
 export interface TranscriptConfig {
     lang?: string;
-    forceReload?: boolean; // Added forceReload option
+    forceReload?: boolean;
 }
 
 export interface TranscriptResponse {
@@ -64,7 +60,9 @@ export interface CaptionTrack {
     name?: {
         simpleText: string;
     };
-    baseUrl: string;
+    baseUrl?: string;
+    url?: string;
+    kind?: string;
 }
 
 export interface TranscriptCache {
@@ -76,10 +74,74 @@ export interface TranscriptCache {
 
 /**
  * Class to retrieve transcript if exist
+ * This is a background-side wrapper that communicates with content scripts
  */
 export class YoutubeTranscript {
-    // Cache to store the last loaded transcript
     private static transcriptCache: TranscriptCache | null = null;
+
+    /**
+     * Find the YouTube tab to send messages to
+     */
+    private static async findYoutubeTab(videoId: string): Promise<number> {
+        const tabs = await chrome.tabs.query({ url: '*://*.youtube.com/*' });
+        
+        // Prefer tab with matching video
+        for (const tab of tabs) {
+            if (tab.id && tab.url?.includes(videoId)) {
+                return tab.id;
+            }
+        }
+        
+        // Fallback to any YouTube tab
+        if (tabs.length > 0 && tabs[0].id) {
+            return tabs[0].id;
+        }
+        
+        throw new YoutubeTranscriptError('No YouTube tab found. Please open YouTube.');
+    }
+
+    /**
+     * Send message to content script and wait for response
+     */
+    private static async sendMessageToContent<T>(tabId: number, message: any): Promise<T> {
+        return new Promise((resolve, reject) => {
+            chrome.tabs.sendMessage(tabId, message, (response: any) => {
+                if (chrome.runtime.lastError) {
+                    reject(new YoutubeTranscriptError(
+                        `Failed to communicate with YouTube page: ${chrome.runtime.lastError.message}`
+                    ));
+                    return;
+                }
+                
+                if (!response) {
+                    reject(new YoutubeTranscriptError('No response from content script'));
+                    return;
+                }
+                
+                if (!response.success) {
+                    // Parse error type and throw appropriate error
+                    const errorType = response.errorType || '';
+                    const videoId = message.videoId;
+                    
+                    if (errorType === 'NO_TRANSCRIPTS_AVAILABLE') {
+                        reject(new YoutubeTranscriptNotAvailableError(videoId));
+                    } else if (errorType.startsWith('LANGUAGE_NOT_AVAILABLE')) {
+                        const lang = errorType.split(':')[1] || message.lang;
+                        reject(new YoutubeTranscriptNotAvailableLanguageError(
+                            lang,
+                            [],
+                            videoId
+                        ));
+                    } else {
+                        reject(new YoutubeTranscriptError(response.error || 'Unknown error'));
+                    }
+                    return;
+                }
+                
+                resolve(response.data);
+            });
+        });
+    }
 
     /**
      * Fetch transcript from YTB Video
@@ -92,7 +154,7 @@ export class YoutubeTranscript {
     ): Promise<TranscriptResponse[]> {
         const identifier = this.retrieveVideoId(videoId);
         
-        // Check if we can use the cache
+        // Check cache
         if (
             !config?.forceReload && 
             this.transcriptCache && 
@@ -102,100 +164,37 @@ export class YoutubeTranscript {
             return this.transcriptCache.transcripts;
         }
 
-        const videoPageResponse = await fetch(
-            `https://www.youtube.com/watch?v=${identifier}`,
-            {
-                headers: {
-                    ...(config?.lang && { 'Accept-Language': config.lang }),
-                    'User-Agent': USER_AGENT,
-                },
+        try {
+            // Find YouTube tab
+            const tabId = await this.findYoutubeTab(identifier);
+            
+            // Send message to content script
+            const transcripts = await this.sendMessageToContent<TranscriptResponse[]>(
+                tabId,
+                {
+                    type: 'FETCH_TRANSCRIPT',
+                    videoId: identifier,
+                    lang: config?.lang
+                }
+            );
+            
+            // Update cache
+            this.transcriptCache = {
+                videoId: identifier,
+                transcripts: transcripts,
+                lang: transcripts[0]?.lang || config?.lang || '',
+                availableLanguages: []
+            };
+            
+            return transcripts;
+        } catch (error) {
+            if (error instanceof YoutubeTranscriptError) {
+                throw error;
             }
-        );
-        const videoPageBody = await videoPageResponse.text();
-
-        const splittedHTML = videoPageBody.split('"captions":');
-
-        if (splittedHTML.length <= 1) {
-            if (videoPageBody.includes('class="g-recaptcha"')) {
-                throw new YoutubeTranscriptTooManyRequestError();
-            }
-            if (!videoPageBody.includes('"playabilityStatus":')) {
-                throw new YoutubeTranscriptVideoUnavailableError(videoId);
-            }
-            throw new YoutubeTranscriptDisabledError(videoId);
-        }
-
-        const captions = (() => {
-            try {
-                return JSON.parse(
-                    splittedHTML[1].split(',"videoDetails')[0].replace('\n', '')
-                );
-            } catch (e) {
-                return undefined;
-            }
-        })()?.['playerCaptionsTracklistRenderer'];
-
-        if (!captions) {
-            throw new YoutubeTranscriptDisabledError(videoId);
-        }
-
-        if (!('captionTracks' in captions)) {
-            throw new YoutubeTranscriptNotAvailableError(videoId);
-        }
-
-        const captionTracks: CaptionTrack[] = captions.captionTracks;
-
-        if (
-            config?.lang &&
-            !captionTracks.some(
-                (track: CaptionTrack) => track.languageCode === config?.lang
-            )
-        ) {
-            throw new YoutubeTranscriptNotAvailableLanguageError(
-                config?.lang,
-                captionTracks.map((track: CaptionTrack) => track.languageCode),
-                videoId
+            throw new YoutubeTranscriptError(
+                error instanceof Error ? error.message : 'Unknown error occurred'
             );
         }
-
-        const selectedTrack: CaptionTrack = (
-            config?.lang
-                ? captionTracks.find(
-                    (track: CaptionTrack) => track.languageCode === config?.lang
-                )
-                : captionTracks[0]
-        ) as CaptionTrack;
-
-        const transcriptURL: string = selectedTrack.baseUrl;
-
-        const transcriptResponse = await fetch(transcriptURL, {
-            headers: {
-                ...(config?.lang && { 'Accept-Language': config.lang }),
-                'User-Agent': USER_AGENT,
-            },
-        });
-        if (!transcriptResponse.ok) {
-            throw new YoutubeTranscriptNotAvailableError(videoId);
-        }
-        const transcriptBody = await transcriptResponse.text();
-        const results = [...transcriptBody.matchAll(RE_XML_TRANSCRIPT)];
-        
-        const transcripts = results.map((result) => ({
-            text: result[3],
-            duration: parseFloat(result[2]),
-            offset: parseFloat(result[1]),
-            lang: selectedTrack.languageCode,
-        }));
-
-        // Store in cache
-        this.transcriptCache = {
-            videoId: identifier,
-            transcripts: transcripts,
-            lang: selectedTrack.languageCode,
-            availableLanguages: captionTracks
-        };
-        
-        return transcripts;
     }
 
     /**
@@ -206,72 +205,50 @@ export class YoutubeTranscript {
     public static async getLanguages(videoId: string, forceReload: boolean = false): Promise<CaptionTrack[]> {
         const identifier = this.retrieveVideoId(videoId);
         
-        // Check if we can use the cache
+        // Check cache
         if (
             !forceReload && 
             this.transcriptCache && 
-            this.transcriptCache.videoId === identifier
+            this.transcriptCache.videoId === identifier &&
+            this.transcriptCache.availableLanguages.length > 0
         ) {
             return this.transcriptCache.availableLanguages;
         }
         
-        // Otherwise, we need to fetch the video page
-        const videoPageResponse = await fetch(
-            `https://www.youtube.com/watch?v=${identifier}`,
-            {
-                headers: {
-                    'User-Agent': USER_AGENT,
-                },
+        try {
+            // Find YouTube tab
+            const tabId = await this.findYoutubeTab(identifier);
+            
+            // Send message to content script
+            const languages = await this.sendMessageToContent<CaptionTrack[]>(
+                tabId,
+                {
+                    type: 'GET_LANGUAGES',
+                    videoId: identifier
+                }
+            );
+            
+            // Update cache
+            if (!this.transcriptCache || this.transcriptCache.videoId !== identifier) {
+                this.transcriptCache = {
+                    videoId: identifier,
+                    transcripts: [],
+                    lang: '',
+                    availableLanguages: languages
+                };
+            } else {
+                this.transcriptCache.availableLanguages = languages;
             }
-        );
-        const videoPageBody = await videoPageResponse.text();
-
-        const splittedHTML = videoPageBody.split('"captions":');
-
-        if (splittedHTML.length <= 1) {
-            if (videoPageBody.includes('class="g-recaptcha"')) {
-                throw new YoutubeTranscriptTooManyRequestError();
+            
+            return languages;
+        } catch (error) {
+            if (error instanceof YoutubeTranscriptError) {
+                throw error;
             }
-            if (!videoPageBody.includes('"playabilityStatus":')) {
-                throw new YoutubeTranscriptVideoUnavailableError(videoId);
-            }
-            throw new YoutubeTranscriptDisabledError(videoId);
+            throw new YoutubeTranscriptError(
+                error instanceof Error ? error.message : 'Unknown error occurred'
+            );
         }
-
-        const captions = (() => {
-            try {
-                return JSON.parse(
-                    splittedHTML[1].split(',"videoDetails')[0].replace('\n', '')
-                );
-            } catch (e) {
-                return undefined;
-            }
-        })()?.['playerCaptionsTracklistRenderer'];
-
-        if (!captions) {
-            throw new YoutubeTranscriptDisabledError(videoId);
-        }
-
-        if (!('captionTracks' in captions)) {
-            throw new YoutubeTranscriptNotAvailableError(videoId);
-        }
-        
-        // Store available languages in cache, without loading any transcript
-        const captionTracks: CaptionTrack[] = captions.captionTracks;
-        
-        if (!this.transcriptCache) {
-            this.transcriptCache = {
-                videoId: identifier,
-                transcripts: [],
-                lang: '',
-                availableLanguages: captionTracks
-            };
-        } else {
-            this.transcriptCache.videoId = identifier;
-            this.transcriptCache.availableLanguages = captionTracks;
-        }
-        
-        return captionTracks;
     }
 
     /**
